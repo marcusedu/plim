@@ -1,0 +1,22 @@
+# Configurações e segredos locais
+.plimrc
+config
+.config/
+
+# IDEs e Editores
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema Operacional
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Arquivos temporários e logs
+*.tmp
+*.log
