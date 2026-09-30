@@ -19,15 +19,26 @@ Acompanha backend serverless em **Cloudflare Worker** integrado ao bot **[@plim_
   - Webhook oficial do Telegram com geração automática de tokens.
   - Armazenamento em Cloudflare KV (`token -> chat_id`, limites de uso diário).
   - Suporte a planos Free (50 notificações/dia) e Pro/Ilimitado (preparado para Telegram Stars).
+- **100% Multiplataforma**:
+  - 🍏 **macOS**: `afplay` e AppleScript nativos.
+  - 🐧 **Linux**: `notify-send` e sons do freedesktop (`paplay`/`aplay`/bell).
+  - 🪟 **Windows**: Suporte total via WSL, Git Bash e script nativo `plim.ps1` para PowerShell.
 - **Modo Self-Hosted**: Quem preferir usar um bot próprio sem passar pelo Cloudflare pode configurar diretamente via `plim config set`.
 
 ---
 
 ## 🚀 Instalação Rápida
 
-### 1. Instalar via Terminal
+### macOS / Linux / Windows (WSL & Git Bash)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash
+```
+
+### Windows (PowerShell Nativo)
+Clone o repositório ou adicione a pasta `bin` ao seu `$PATH`, ou use:
+```powershell
+.\bin\plim.ps1 connect <SEU_TOKEN>
+.\bin\plim.ps1 run npm run build
 ```
 
 *(Ou clone o repositório e rode `make link` para desenvolvimento).*

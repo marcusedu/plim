@@ -1,19 +1,164 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 
-# Carrega configurações (~/.config/plim/config ou ~/.plimrc)
+# Plim - CLI de produtividade multiplataforma (macOS, Linux, Windows Git Bash / WSL)
+
+# ---------------------------------------------------------------------------
+# Configurações (~/.config/plim/config ou ~/.plimrc)
+# ---------------------------------------------------------------------------
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/plim"
 CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
 SOUNDS_DIR="/System/Library/Sounds"
+DEFAULT_API_URL="https://plim-api.marcusedu.workers.dev"
+API_URL="${PLIM_API_URL:-$DEFAULT_API_URL}"
 
-random_sound() {
-    local sounds=($SOUNDS_DIR/*.aiff)
-    echo "${sounds[$((RANDOM % ${#sounds[@]} + 1))]}"
+# ---------------------------------------------------------------------------
+# Efeitos Sonoros Multiplataforma
+# ---------------------------------------------------------------------------
+random_mac_sound() {
+    if [[ -d "$SOUNDS_DIR" ]]; then
+        local sounds=("$SOUNDS_DIR"/*.aiff)
+        local count=${#sounds[@]}
+        if [[ $count -gt 0 ]]; then
+            local idx=$((RANDOM % count))
+            local chosen=""
+            local i=0
+            for s in "${sounds[@]}"; do
+                if [[ $i -eq $idx ]]; then
+                    chosen="$s"
+                    break
+                fi
+                i=$((i + 1))
+            done
+            echo "${chosen:-${sounds[0]}}"
+            return
+        fi
+    fi
+    echo ""
 }
 
-send_telegram() {
+play_sound() {
+    local sound_type="${1:-random}" # success | error | random | <nome_som>
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS: afplay nativo
+        local sound_file=""
+        case "$sound_type" in
+            success) sound_file="$SOUNDS_DIR/Ping.aiff" ;;
+            error)   sound_file="$SOUNDS_DIR/Basso.aiff" ;;
+            random)  sound_file=$(random_mac_sound) ;;
+            *)
+                if [[ -f "$SOUNDS_DIR/${sound_type}.aiff" ]]; then
+                    sound_file="$SOUNDS_DIR/${sound_type}.aiff"
+                else
+                    sound_file=$(random_mac_sound)
+                fi
+                ;;
+        esac
+        if [[ -n "$sound_file" && -f "$sound_file" ]]; then
+            afplay "$sound_file" 2>/dev/null &
+        fi
+
+    elif [[ "$OSTYPE" == "linux"* ]]; then
+        # Linux: PulseAudio / PipeWire / ALSA / Freedesktop Sound Theme
+        local linux_sound=""
+        if [[ "$sound_type" == "error" ]]; then
+            linux_sound="/usr/share/sounds/freedesktop/stereo/dialog-error.oga"
+        else
+            linux_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
+        fi
+
+        if command -v paplay >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
+            paplay "$linux_sound" 2>/dev/null &
+        elif command -v canberra-gtk-play >/dev/null 2>&1; then
+            canberra-gtk-play -i "${sound_type:-complete}" 2>/dev/null &
+        elif command -v pw-play >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
+            pw-play "$linux_sound" 2>/dev/null &
+        elif command -v aplay >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
+            aplay -q "$linux_sound" 2>/dev/null &
+        else
+            printf '\a' # Terminal Bell clássico
+        fi
+
+    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+        # Windows Git Bash / MSYS2: Som de sistema via PowerShell
+        powershell.exe -NoProfile -Command "[System.Media.SystemSounds]::Asterisk.Play()" 2>/dev/null &
+    else
+        printf '\a' # Fallback universal
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Notificações Locais de Desktop
+# ---------------------------------------------------------------------------
+show_desktop_notification() {
+    local title="$1"
+    local message="$2"
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS: AppleScript nativo
+        local nl=$'\n'
+        osascript -e "display notification \"${message}\" with title \"${title}\"" 2>/dev/null &
+
+    elif [[ "$OSTYPE" == "linux"* ]]; then
+        # Linux: libnotify / notify-send (GNOME, KDE, XFCE, etc.)
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send "$title" "$message" 2>/dev/null &
+        fi
+
+    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+        # Windows Git Bash: Notificação nativa via PowerShell
+        powershell.exe -NoProfile -Command "
+          [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > \$null;
+          \$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);
+          \$text = \$template.GetElementsByTagName('text');
+          \$text.Item(0).AppendChild(\$template.CreateTextNode('$title')) > \$null;
+          \$text.Item(1).AppendChild(\$template.CreateTextNode('$message')) > \$null;
+          \$toast = [Windows.UI.Notifications.ToastNotification]::new(\$template);
+          [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Plim').Show(\$toast);
+        " 2>/dev/null &
+
+    elif grep -qi microsoft /proc/version 2>/dev/null; then
+        # WSL: Tenta wsl-notify-send ou powershell
+        if command -v wsl-notify-send.exe >/dev/null 2>&1; then
+            wsl-notify-send.exe "$title" "$message" 2>/dev/null &
+        elif command -v powershell.exe >/dev/null 2>&1; then
+            powershell.exe -NoProfile -Command "[System.Media.SystemSounds]::Asterisk.Play()" 2>/dev/null &
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Funções Auxiliares (JSON & Duração)
+# ---------------------------------------------------------------------------
+escape_json() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json, sys; print(json.dumps(sys.stdin.read().rstrip("\n"))[1:-1], end="")' <<< "$1"
+    else
+        local s="$1"
+        s="${s//\\/\\\\}"
+        s="${s//\"/\\\"}"
+        s="${s//$'\n'/\\n}"
+        s="${s//$'\r'/}"
+        s="${s//$'\t'/\\t}"
+        printf "%s" "$s"
+    fi
+}
+
+format_duration() {
+    local elapsed=$1
+    if [[ $elapsed -ge 3600 ]]; then
+        echo "$((elapsed / 3600))h $(((elapsed % 3600) / 60))m $((elapsed % 60))s"
+    elif [[ $elapsed -ge 60 ]]; then
+        echo "$((elapsed / 60))m $((elapsed % 60))s"
+    else
+        echo "${elapsed}s"
+    fi
+}
+
+send_telegram_direct() {
     local title="$1"
     local body="$2"
     local extra="$3"
@@ -42,17 +187,38 @@ send_telegram() {
         -d parse_mode="HTML" >/dev/null 2>&1 &
 }
 
-format_duration() {
-    local elapsed=$1
-    if [[ $elapsed -ge 3600 ]]; then
-        echo "$((elapsed / 3600))h $(((elapsed % 3600) / 60))m $((elapsed % 60))s"
-    elif [[ $elapsed -ge 60 ]]; then
-        echo "$((elapsed / 60))m $((elapsed % 60))s"
-    else
-        echo "${elapsed}s"
+send_remote_notification() {
+    local title="$1"
+    local body="$2"
+    local extra="$3"
+    local duration="$4"
+    local notif_status="$5"
+
+    # Modo 1: Plim Cloud / Cloudflare Worker (via token plim_live_...)
+    if [[ -n "$PLIM_API_KEY" ]]; then
+        local safe_title=$(escape_json "$title")
+        local safe_body=$(escape_json "$body")
+        local safe_extra=$(escape_json "$extra")
+        local safe_dur=$(escape_json "$duration")
+
+        local payload="{\"title\":\"${safe_title}\",\"body\":\"${safe_body}\",\"log\":\"${safe_extra}\",\"duration\":\"${safe_dur}\",\"status\":\"${notif_status:-info}\"}"
+
+        curl -s -X POST "${API_URL}/api/notify" \
+            -H "Authorization: Bearer ${PLIM_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}" >/dev/null 2>&1 &
+        return 0
+    fi
+
+    # Modo 2: Self-hosted / Bot Telegram próprio direto
+    if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+        send_telegram_direct "$title" "$body" "$extra"
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Modo Executor (plim run <comando>)
+# ---------------------------------------------------------------------------
 run_command() {
     if [[ $# -eq 0 ]]; then
         echo "Uso: plim run <comando e argumentos>"
@@ -62,52 +228,86 @@ run_command() {
 
     local full_cmd="$*"
     local start_time=$(date +%s)
-    local temp_out=$(mktemp -t plim_output.XXXXXX)
+    local temp_out=$(mktemp -t plim_output.XXXXXX 2>/dev/null || mktemp)
 
     echo "🚀 [plim] Executando: $full_cmd"
 
-    # Executa o comando via eval para suportar flags, pipes e cadeias
+    # Executa o comando via eval para suportar flags, pipes e encadeamentos
     eval "$@" 2>&1 | tee "$temp_out"
     local exit_code=${pipestatus[1]:-${PIPESTATUS[0]:-$?}}
 
     local end_time=$(date +%s)
     local duration=$(format_duration $((end_time - start_time)))
 
-    local tail_output=$(tail -n 15 "$temp_out")
+    local tail_output=$(tail -n 15 "$temp_out" 2>/dev/null)
     rm -f "$temp_out"
 
-    local status_icon status_label sound_name
+    local status_icon status_label status_type sound_key
     if [[ $exit_code -eq 0 ]]; then
         status_icon="✅"
         status_label="Sucesso"
-        sound_name="Ping"
+        status_type="success"
+        sound_key="success"
     else
         status_icon="❌"
         status_label="Falha (exit $exit_code)"
-        sound_name="Basso"
+        status_type="error"
+        sound_key="error"
     fi
 
-    # Som
-    if [[ -f "$SOUNDS_DIR/${sound_name}.aiff" ]]; then
-        afplay "$SOUNDS_DIR/${sound_name}.aiff" &
-    else
-        afplay "$(random_sound)" &
-    fi
+    # 1. Som nativo
+    play_sound "$sound_key"
 
-    # Notificação local macOS
+    # 2. Notificação local de desktop
     local nl=$'\n'
-    osascript -e "display notification \"Duração: ${duration}${nl}${full_cmd}\" with title \"${status_icon} Plim: ${status_label}\"" 2>/dev/null &
+    show_desktop_notification "${status_icon} Plim: ${status_label}" "Duração: ${duration}${nl}${full_cmd}"
 
-    # Notificação Telegram
-    send_telegram "${status_icon} ${status_label}: <code>${full_cmd}</code>" "⏱ <b>Duração:</b> ${duration}" "$tail_output"
+    # 3. Notificação Remota (Cloudflare Worker ou Telegram Direto)
+    send_remote_notification "${status_icon} ${status_label}: ${full_cmd}" "" "$tail_output" "$duration" "$status_type"
 
     return $exit_code
 }
 
+# ---------------------------------------------------------------------------
+# Roteamento de Comandos CLI
+# ---------------------------------------------------------------------------
 case "$1" in
     run|--run)
         shift
         run_command "$@"
+        ;;
+
+    connect)
+        shift
+        local token="$1"
+        if [[ -z "$token" ]]; then
+            echo "Uso: plim connect <SEU_TOKEN>"
+            echo "Exemplo: plim connect plim_live_abc123..."
+            echo ""
+            echo "Para obter um token, abra o bot no Telegram e envie /start:"
+            echo "👉 https://t.me/plim_the_bot"
+            return 1 2>/dev/null || exit 1
+        fi
+
+        mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+        cat << EOF > "$CONFIG_FILE"
+PLIM_API_KEY="$token"
+PLIM_API_URL="${API_URL}"
+EOF
+        chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+        echo "✅ Configuração salva em $CONFIG_FILE"
+        echo "📡 Conectando ao Plim Cloud..."
+
+        local res=$(curl -s -X POST "${API_URL}/api/connect" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\": \"$token\"}")
+
+        if echo "$res" | grep -q '"ok":true'; then
+            echo "🎉 Conectado com sucesso! Verifique a notificação de boas-vindas no seu Telegram."
+        else
+            echo "⚠️  Salvo localmente, mas a verificação remota retornou: $res"
+            echo "Você pode testar o envio com: plim test"
+        fi
         ;;
 
     --notification|-n)
@@ -121,47 +321,53 @@ case "$1" in
             echo "$input_data"
         fi
 
-        sound=$(random_sound)
-        afplay "$sound" &
+        play_sound "random"
 
         # Interpreta \n se passado na mensagem
         [[ -n "$message" ]] && message=$(printf "%b" "$message")
 
-        local mac_msg="${message:-Notificação recebida}"
+        local local_msg="${message:-Notificação recebida}"
         if [[ -z "$message" && -n "$input_data" ]]; then
-            mac_msg=$(echo "$input_data" | tail -n 2)
+            local_msg=$(echo "$input_data" | tail -n 2)
         fi
-        osascript -e "display notification \"$mac_msg\" with title \"Plim\"" 2>/dev/null &
+        show_desktop_notification "Plim" "$local_msg"
 
-        if [[ -n "$message" ]]; then
-            send_telegram "🔔 Plim" "$message" "$input_data"
-        else
-            send_telegram "🔔 Plim" "" "$input_data"
-        fi
+        send_remote_notification "🔔 Plim: ${message:-Notificação}" "" "$input_data" "" "info"
         ;;
 
     --play|-p)
-        afplay "$SOUNDS_DIR/$2.aiff"
+        play_sound "$2"
         ;;
 
     --list|-l)
-        ls "$SOUNDS_DIR" | sed 's/\.aiff$//'
+        if [[ "$OSTYPE" == "darwin"* && -d "$SOUNDS_DIR" ]]; then
+            ls "$SOUNDS_DIR" | sed 's/\.aiff$//'
+        else
+            echo "Sons de sistema disponíveis:"
+            echo "  success (som de conclusão)"
+            echo "  error   (som de alerta)"
+            echo "  random  (som aleatório)"
+        fi
         ;;
 
     test|--test)
         echo "🔊 Testando som local..."
-        afplay "$(random_sound)" &
-        osascript -e "display notification \"Teste local do Plim funcionando!\" with title \"Plim\"" 2>/dev/null &
+        play_sound "success"
+        show_desktop_notification "Plim" "Teste local do Plim funcionando!"
 
-        if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
-            echo "📱 Enviando notificação de teste para o Telegram..."
-            send_telegram "🔔 Teste do Plim" "Se você recebeu esta mensagem, a integração com o Telegram está 100% funcionando! 🎉" ""
+        if [[ -n "$PLIM_API_KEY" ]]; then
+            echo "📱 Enviando notificação de teste via Plim Cloud (Worker)..."
+            send_remote_notification "🔔 Teste do Plim" "A integração com o Plim Cloud está 100% funcionando! 🎉" "" "" "info"
+            echo "✅ Requisição enviada para a API."
+        elif [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+            echo "📱 Enviando notificação de teste direto para o Telegram..."
+            send_telegram_direct "🔔 Teste do Plim" "A integração com seu bot do Telegram está funcionando! 🎉" ""
             echo "✅ Mensagem enviada para o Telegram (Chat ID: $TELEGRAM_CHAT_ID)."
         else
-            echo "⚠️  Telegram não configurado."
-            echo "Crie o arquivo $CONFIG_FILE com:"
-            echo '  TELEGRAM_BOT_TOKEN="seu_token"'
-            echo '  TELEGRAM_CHAT_ID="seu_chat_id"'
+            echo "⚠️  Nenhum serviço remoto configurado."
+            echo "Para conectar com 1 clique:"
+            echo "  1. Abra https://t.me/plim_the_bot e envie /start"
+            echo "  2. Rode: plim connect <SEU_TOKEN>"
         fi
         ;;
 
@@ -172,7 +378,7 @@ case "$1" in
             local chat_id="$3"
             if [[ -z "$token" || -z "$chat_id" ]]; then
                 echo "Uso: plim config set <BOT_TOKEN> <CHAT_ID>"
-                return 1
+                return 1 2>/dev/null || exit 1
             fi
             mkdir -p "$CONFIG_DIR" 2>/dev/null || true
             cat << EOF > "$CONFIG_FILE"
@@ -181,7 +387,19 @@ TELEGRAM_CHAT_ID="$chat_id"
 EOF
             chmod 600 "$CONFIG_FILE" 2>/dev/null || true
             echo "✅ Configuração salva com sucesso em: $CONFIG_FILE"
-            return 0
+            return 0 2>/dev/null || exit 0
+        fi
+
+        if [[ "$1" == "set-url" ]]; then
+            local url="$2"
+            if [[ -z "$url" ]]; then
+                echo "Uso: plim config set-url <URL_DA_API>"
+                return 1 2>/dev/null || exit 1
+            fi
+            mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+            echo "PLIM_API_URL=\"$url\"" >> "$CONFIG_FILE"
+            echo "✅ URL da API configurada para: $url"
+            return 0 2>/dev/null || exit 0
         fi
 
         echo "Configuração do Plim:"
@@ -190,27 +408,28 @@ EOF
         if [[ -f "$CONFIG_FILE" ]]; then
             cat "$CONFIG_FILE"
         else
-            echo "Arquivo ainda não configurado."
-            echo "Para configurar rapidamente, execute:"
-            echo '  plim config set "<SEU_BOT_TOKEN>" "<SEU_CHAT_ID>"'
+            echo "Nenhum arquivo de configuração ativo."
+            echo "Para conectar ao Cloudflare Worker:"
+            echo "  plim connect <SEU_TOKEN>"
+            echo "Ou para usar bot próprio:"
+            echo '  plim config set "<BOT_TOKEN>" "<CHAT_ID>"'
         fi
         ;;
 
     ""|--random|-r)
-        sound=$(random_sound)
-        afplay "$sound"
+        play_sound "random"
         ;;
 
     *)
         echo "Uso:"
-        echo "  plim                           # Toca som aleatório"
-        echo "  plim -n 'Mensagem'             # Notificação no Mac e Telegram"
+        echo "  plim                           # Toca som aleatório ou sinal sonoro"
+        echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
+        echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
         echo "  comando | plim -n 'Deploy'     # Lê a saída do comando e notifica"
-        echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e envia output"
-        echo "  plim -p Ping                   # Toca um som específico"
+        echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
+        echo "  plim test                      # Testa som e notificações remotas"
+        echo "  plim config                    # Exibe configuração atual"
+        echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
         echo "  plim -l                        # Lista sons disponíveis"
-        echo "  plim test                      # Testa som e envio ao Telegram"
-        echo "  plim config                    # Mostra configuração do Telegram"
         ;;
 esac
-

@@ -2,27 +2,50 @@
 
 set -e
 
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_BIN="$SCRIPT_DIR/bin/plim"
+REPO="marcusedu/plim"
+RAW_URL="https://raw.githubusercontent.com/${REPO}/main/bin/plim"
+INSTALL_DIR="${HOME}/.local/bin"
+TARGET="${INSTALL_DIR}/plim"
 
+echo "🔔 Instalando Plim..."
+
+# Cria diretório de destino
 mkdir -p "$INSTALL_DIR"
 
-if [[ "$1" == "--copy" || "$1" == "-c" ]]; then
-    echo "📦 Copiando plim para $INSTALL_DIR/plim..."
-    cp "$SOURCE_BIN" "$INSTALL_DIR/plim"
+# Se executado dentro do próprio repositório clonado
+if [[ -f "./bin/plim" ]]; then
+    echo "📦 Instalando a partir do repositório local..."
+    cp "./bin/plim" "$TARGET"
 else
-    echo "🔗 Criando link simbólico de plim em $INSTALL_DIR/plim..."
-    ln -sf "$SOURCE_BIN" "$INSTALL_DIR/plim"
+    echo "🌐 Baixando a versão mais recente do GitHub..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$RAW_URL" -o "$TARGET"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$TARGET" "$RAW_URL"
+    else
+        echo "❌ Erro: curl ou wget é necessário para a instalação."
+        exit 1
+    fi
 fi
 
-chmod +x "$INSTALL_DIR/plim"
+chmod +x "$TARGET"
+echo "✅ Plim instalado em: $TARGET"
 
-echo "✅ 'plim' instalado com sucesso em $INSTALL_DIR/plim!"
-
+# Verifica se ~/.local/bin está no PATH
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo ""
-    echo "⚠️  Atenção: $INSTALL_DIR não está no seu PATH."
+    echo "⚠️  Aviso: $INSTALL_DIR não está no seu PATH."
     echo "Adicione ao seu ~/.zshrc ou ~/.bashrc:"
     echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+fi
+
+# Se um token foi passado como argumento (ex: curl ... | bash -s -- plim_live_xyz)
+if [[ -n "$1" ]]; then
+    echo "🔑 Conectando ao token fornecido: $1"
+    "$TARGET" connect "$1"
+else
+    echo ""
+    echo "🎉 Instalação concluída!"
+    echo "Para conectar ao Telegram, abra https://t.me/plim_the_bot e envie /start"
 fi
