@@ -10,7 +10,7 @@ CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
-PLIM_VERSION="1.1.0"
+PLIM_VERSION="1.2.0"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
@@ -62,7 +62,7 @@ play_sound() {
                 ;;
         esac
         if [[ -n "$sound_file" && -f "$sound_file" ]]; then
-            afplay "$sound_file" 2>/dev/null &
+            afplay "$sound_file" </dev/null >/dev/null 2>&1 &
         fi
 
     elif [[ "$OSTYPE" == "linux"* ]]; then
@@ -75,20 +75,20 @@ play_sound() {
         fi
 
         if command -v paplay >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
-            paplay "$linux_sound" 2>/dev/null &
+            paplay "$linux_sound" </dev/null >/dev/null 2>&1 &
         elif command -v canberra-gtk-play >/dev/null 2>&1; then
-            canberra-gtk-play -i "${sound_type:-complete}" 2>/dev/null &
+            canberra-gtk-play -i "${sound_type:-complete}" </dev/null >/dev/null 2>&1 &
         elif command -v pw-play >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
-            pw-play "$linux_sound" 2>/dev/null &
+            pw-play "$linux_sound" </dev/null >/dev/null 2>&1 &
         elif command -v aplay >/dev/null 2>&1 && [[ -f "$linux_sound" ]]; then
-            aplay -q "$linux_sound" 2>/dev/null &
+            aplay -q "$linux_sound" </dev/null >/dev/null 2>&1 &
         else
             printf '\a' # Terminal Bell clássico
         fi
 
     elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
         # Windows Git Bash / MSYS2: Som de sistema via PowerShell
-        powershell.exe -NoProfile -Command "[System.Media.SystemSounds]::Asterisk.Play()" 2>/dev/null &
+        powershell.exe -NoProfile -Command "[System.Media.SystemSounds]::Asterisk.Play()" </dev/null >/dev/null 2>&1 &
     else
         printf '\a' # Fallback universal
     fi
@@ -104,7 +104,7 @@ show_desktop_notification() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS: AppleScript nativo
         local nl=$'\n'
-        osascript -e "display notification \"${message}\" with title \"${title}\"" 2>/dev/null &
+        osascript -e "display notification \"${message}\" with title \"${title}\"" </dev/null >/dev/null 2>&1 &
 
     elif [[ "$OSTYPE" == "linux"* ]]; then
         # Linux: libnotify / notify-send (GNOME, KDE, XFCE, etc.)
@@ -180,7 +180,7 @@ send_telegram_direct() {
     if [[ -n "$extra" ]]; then
         local escaped_extra=$(echo "$extra" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
         if [[ ${#escaped_extra} -gt 3500 ]]; then
-            escaped_extra="${escaped_extra[-3500,-1]}"
+            escaped_extra="${escaped_extra: -3500}"
         fi
         text="${text}${nl}${nl}<pre>${escaped_extra}</pre>"
     fi
@@ -189,12 +189,12 @@ send_telegram_direct() {
         curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${text}" \
-            -d parse_mode="HTML" >/dev/null 2>&1
+            -d parse_mode="HTML" </dev/null >/dev/null 2>&1
     else
         nohup curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${text}" \
-            -d parse_mode="HTML" >/dev/null 2>&1 &
+            -d parse_mode="HTML" </dev/null >/dev/null 2>&1 &
     fi
 }
 
@@ -204,6 +204,11 @@ send_remote_notification() {
     local extra="$3"
     local duration="$4"
     local notif_status="$5"
+
+    # Trunca extra com segurança para não sobrecarregar curl nem exceder limites
+    if [[ -n "$extra" && ${#extra} -gt 3500 ]]; then
+        extra="${extra: -3500}"
+    fi
 
     # Modo 1: Plim Cloud / Cloudflare Worker (via token plim_live_...)
     if [[ -n "$PLIM_API_KEY" ]]; then
@@ -218,12 +223,12 @@ send_remote_notification() {
             curl -s -X POST "${API_URL}/api/notify" \
                 -H "Authorization: Bearer ${PLIM_API_KEY}" \
                 -H "Content-Type: application/json" \
-                -d "${payload}" >/dev/null 2>&1
+                -d "${payload}" </dev/null >/dev/null 2>&1
         else
             nohup curl -s -X POST "${API_URL}/api/notify" \
                 -H "Authorization: Bearer ${PLIM_API_KEY}" \
                 -H "Content-Type: application/json" \
-                -d "${payload}" >/dev/null 2>&1 &
+                -d "${payload}" </dev/null >/dev/null 2>&1 &
         fi
         return 0
     fi
@@ -344,7 +349,7 @@ check_update_daily() {
             if [[ -n "$r_ver" ]]; then
                 echo "$r_ver" > "$latest_file"
             fi
-        ) >/dev/null 2>&1 &
+        ) </dev/null >/dev/null 2>&1 &
     fi
 }
 
@@ -402,12 +407,133 @@ update_plim() {
 check_update_daily "$1"
 
 # ---------------------------------------------------------------------------
+# Entrada de Pipe ou Notificação Rápida
+# ---------------------------------------------------------------------------
+handle_notify_or_pipe() {
+    local message="$*"
+    local input_data=""
+
+    # Se houver entrada vinda de pipe (ex: comando | plim ou comando | plim -n "Fim")
+    if [[ ! -t 0 ]]; then
+        local temp_pipe
+        temp_pipe=$(mktemp -t plim_pipe.XXXXXX 2>/dev/null || mktemp)
+        # tee repassa imediatamente para o stdout sem travar o streaming
+        tee "$temp_pipe"
+        input_data=$(tail -n 25 "$temp_pipe" 2>/dev/null)
+        rm -f "$temp_pipe"
+    fi
+
+    play_sound "random"
+
+    # Interpreta \n se passado na mensagem
+    [[ -n "$message" ]] && message=$(printf "%b" "$message")
+
+    local local_msg="${message:-Processamento concluído}"
+    local notif_title="🔔 Plim: ${message:-Notificação}"
+
+    if [[ -z "$message" && -n "$input_data" ]]; then
+        local_msg=$(echo "$input_data" | tail -n 2)
+        notif_title="🔔 Plim: Pipe concluído"
+    fi
+
+    show_desktop_notification "Plim" "$local_msg"
+    send_remote_notification "$notif_title" "" "$input_data" "" "info"
+}
+
+# ---------------------------------------------------------------------------
 # Roteamento de Comandos CLI
 # ---------------------------------------------------------------------------
 case "$1" in
     run|--run)
         shift
         run_command "$@"
+        ;;
+
+    ask|--ask)
+        shift
+        question="$1"
+        shift
+        if [[ -z "$question" ]]; then
+            echo "Uso: plim ask \"Sua pergunta\" [opcao1] [opcao2] ..."
+            echo "Exemplo: plim ask \"Aplicar migração em produção?\" \"Sim\" \"Não\""
+            return 1 2>/dev/null || exit 1
+        fi
+
+        if [[ -z "$PLIM_API_KEY" ]]; then
+            echo "❌ Erro: Plim não está conectado ao Telegram. Execute 'plim connect <token>' primeiro."
+            return 1 2>/dev/null || exit 1
+        fi
+
+        # Constrói array de opções JSON
+        local options_json="[\"Sim\", \"Não\"]"
+        if [[ $# -gt 0 ]]; then
+            local opts=()
+            for opt in "$@"; do
+                opts+=("\"$(escape_json "$opt")\"")
+            done
+            local joined=$(IFS=,; echo "${opts[*]}")
+            options_json="[${joined}]"
+        fi
+
+        local safe_q=$(escape_json "$question")
+        local payload="{\"question\":\"${safe_q}\",\"options\":${options_json},\"type\":\"question\"}"
+
+        echo "📱 Enviando pergunta para o seu Telegram..."
+        local res
+        res=$(curl -s -X POST "${API_URL}/api/ask" \
+            -H "Authorization: Bearer ${PLIM_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${payload}")
+
+        local ask_id=""
+        if command -v python3 >/dev/null 2>&1; then
+            ask_id=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("id",""))' <<< "$res")
+        else
+            ask_id=$(echo "$res" | sed -n 's/.*"id"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
+        fi
+
+        if [[ -z "$ask_id" ]]; then
+            echo "❌ Falha ao enviar pergunta: $res"
+            return 1 2>/dev/null || exit 1
+        fi
+
+        play_sound "Ping"
+        echo "⏳ Pergunta enviada! Aguardando sua resposta no celular..."
+
+        local answered=false
+        local start_ts=$(date +%s)
+        local timeout_sec=300
+
+        while true; do
+            local now_ts=$(date +%s)
+            if (( now_ts - start_ts > timeout_sec )); then
+                echo ""
+                echo "⏱️ Tempo limite de espera esgotado (${timeout_sec}s)."
+                return 1 2>/dev/null || exit 1
+            fi
+
+            sleep 2
+            local status_res
+            status_res=$(curl -s -X GET "${API_URL}/api/ask/${ask_id}" \
+                -H "Authorization: Bearer ${PLIM_API_KEY}")
+
+            local status_val=""
+            local answer_val=""
+            local answer_idx=0
+            if command -v python3 >/dev/null 2>&1; then
+                status_val=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("status",""))' <<< "$status_res")
+                answer_val=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("answer",""))' <<< "$status_res")
+                answer_idx=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("answerIndex",0))' <<< "$status_res")
+            fi
+
+            if [[ "$status_val" == "answered" ]]; then
+                echo ""
+                play_sound "success"
+                echo "🎉 Resposta recebida pelo Telegram: ${answer_val}"
+                return "$answer_idx" 2>/dev/null || exit "$answer_idx"
+            fi
+            printf "."
+        done
         ;;
 
     update|--update)
@@ -459,27 +585,7 @@ EOF
 
     --notification|-n)
         shift
-        message="$*"
-        input_data=""
-
-        # Se houver entrada vinda de pipe (ex: comando | plim -n "Fim")
-        if [[ ! -t 0 ]]; then
-            input_data=$(cat)
-            echo "$input_data"
-        fi
-
-        play_sound "random"
-
-        # Interpreta \n se passado na mensagem
-        [[ -n "$message" ]] && message=$(printf "%b" "$message")
-
-        local_msg="${message:-Notificação recebida}"
-        if [[ -z "$message" && -n "$input_data" ]]; then
-            local_msg=$(echo "$input_data" | tail -n 2)
-        fi
-        show_desktop_notification "Plim" "$local_msg"
-
-        send_remote_notification "🔔 Plim: ${message:-Notificação}" "" "$input_data" "" "info"
+        handle_notify_or_pipe "$@"
         ;;
 
     --play|-p)
@@ -564,21 +670,33 @@ EOF
         ;;
 
     ""|--random|-r)
-        play_sound "random"
+        if [[ ! -t 0 ]]; then
+            handle_notify_or_pipe
+        else
+            play_sound "random"
+        fi
         ;;
 
     *)
-        echo "Uso:"
-        echo "  plim                           # Toca som aleatório ou sinal sonoro"
-        echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
-        echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
-        echo "  comando | plim -n 'Deploy'     # Lê a saída do comando e notifica"
-        echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
-        echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
-        echo "  plim update                    # Atualiza o Plim para a versão mais recente"
-        echo "  plim version                   # Exibe a versão atual do Plim (-v)"
-        echo "  plim config                    # Exibe configuração atual"
-        echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
-        echo "  plim -l                        # Lista sons disponíveis"
+        # Se houver entrada vinda de pipe OU se foi passada uma mensagem avulsa (ex: plim "Deploy pronto")
+        if [[ ! -t 0 ]] || [[ "$1" != -* ]]; then
+            handle_notify_or_pipe "$@"
+        else
+            echo "Uso:"
+            echo "  plim                           # Toca som aleatório ou sinal sonoro"
+            echo "  plim [mensagem]                # Notificação rápida (ex: plim 'Deploy pronto')"
+            echo "  plim ask <pergunta> [opções]   # Pergunta interativa com botões no Telegram e aguarda resposta"
+            echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
+            echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
+            echo "  comando | plim                 # Lê a saída em tempo real e avisa no término"
+            echo "  comando | plim 'Mensagem'      # Lê a saída e notifica com mensagem customizada"
+            echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
+            echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
+            echo "  plim update                    # Atualiza o Plim para a versão mais recente"
+            echo "  plim version                   # Exibe a versão atual do Plim (-v)"
+            echo "  plim config                    # Exibe configuração atual"
+            echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
+            echo "  plim -l                        # Lista sons disponíveis"
+        fi
         ;;
 esac

@@ -8,8 +8,35 @@
 const { exec } = require('child_process');
 const readline = require('readline');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 const PLIM_BIN = path.resolve(__dirname, 'plim');
+
+function loadPlimConfig() {
+  const home = os.homedir();
+  const configPaths = [
+    path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'plim', 'config'),
+    path.join(home, '.plimrc'),
+  ];
+
+  let apiKey = process.env.PLIM_API_KEY || null;
+  let apiUrl = process.env.PLIM_API_URL || 'https://plim-api.marcusedu.workers.dev';
+
+  for (const p of configPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const content = fs.readFileSync(p, 'utf8');
+        const keyMatch = content.match(/PLIM_API_KEY=["']?([^"'\r\n]+)["']?/);
+        const urlMatch = content.match(/PLIM_API_URL=["']?([^"'\r\n]+)["']?/);
+        if (keyMatch) apiKey = keyMatch[1];
+        if (urlMatch) apiUrl = urlMatch[1];
+      } catch (e) {}
+    }
+  }
+
+  return { apiKey, apiUrl };
+}
 
 const TOOLS = [
   {
@@ -36,14 +63,41 @@ const TOOLS = [
     },
   },
   {
+    name: 'plim_ask',
+    description: "Ask the developer a question with interactive multiple-choice buttons on their mobile phone via Telegram and wait for their response. Use this whenever you need human confirmation, a decision between approaches, or authorization to proceed.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The question to ask the developer.',
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of selectable option labels (e.g. ["Sim", "Não"] or ["Abordagem A", "Abordagem B", "Cancelar"]). Defaults to ["Sim", "Não"].',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Maximum time to wait for developer response in seconds (default: 300, max: 900).',
+        },
+      },
+      required: ['question'],
+    },
+  },
+  {
     name: 'plim_run',
-    description: "Execute a long-running terminal command (e.g. 'npm test', 'docker build', 'cargo build', 'pytest'). Automatically monitors duration, exit code, and notifies the developer on Telegram upon completion.",
+    description: "Execute a terminal command (e.g. 'npm test', 'docker build', 'cargo build', 'pytest'). Automatically monitors duration, exit code, and notifies the developer on Telegram upon completion. If retry_on_failure is enabled and the command fails, sends interactive [Repeat / Cancel] buttons to Telegram.",
     inputSchema: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
           description: 'The shell command to execute.',
+        },
+        retry_on_failure: {
+          type: 'boolean',
+          description: 'If true and the command fails, prompts developer via Telegram buttons to optionally retry execution.',
         },
       },
       required: ['command'],
@@ -75,7 +129,7 @@ function handleRequest(req) {
       },
       serverInfo: {
         name: 'plim-mcp',
-        version: '1.1.0',
+        version: '1.2.0',
       },
     });
   }
@@ -111,6 +165,89 @@ function handleRequest(req) {
       return;
     }
 
+    if (name === 'plim_ask') {
+      const question = args.question;
+      const options = Array.isArray(args.options) && args.options.length > 0 ? args.options : ['Sim', 'Não'];
+      const timeoutSec = Math.min(Math.max(args.timeout || 300, 10), 900);
+
+      const { apiKey, apiUrl } = loadPlimConfig();
+      if (!apiKey) {
+        return sendResponse(id, {
+          content: [{ type: 'text', text: 'Error: Plim is not connected. Run `plim connect <token>` first.' }],
+          isError: true,
+        });
+      }
+
+      // Toca som de alerta no Mac avisando sobre pergunta pendente
+      exec(`"${PLIM_BIN}" -p Ping </dev/null >/dev/null 2>&1 &`);
+
+      (async () => {
+        try {
+          const createRes = await fetch(`${apiUrl}/api/ask`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ question, options, type: 'question' }),
+          });
+
+          const createData = await createRes.json();
+          if (!createData.ok || !createData.id) {
+            return sendResponse(id, {
+              content: [{ type: 'text', text: `Failed to create Telegram question: ${createData.error || 'Unknown error'}` }],
+              isError: true,
+            });
+          }
+
+          const askId = createData.id;
+          const startTime = Date.now();
+          const pollIntervalMs = 2000;
+
+          const pollTimer = setInterval(async () => {
+            const elapsedSec = (Date.now() - startTime) / 1000;
+            if (elapsedSec >= timeoutSec) {
+              clearInterval(pollTimer);
+              return sendResponse(id, {
+                content: [{ type: 'text', text: `Timeout: Developer did not answer within ${timeoutSec} seconds.` }],
+                isError: true,
+              });
+            }
+
+            try {
+              const statusRes = await fetch(`${apiUrl}/api/ask/${askId}`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+              });
+              const statusData = await statusRes.json();
+
+              if (statusData.ok && statusData.status === 'answered') {
+                clearInterval(pollTimer);
+                // Som de confirmação de resposta recebida
+                exec(`"${PLIM_BIN}" -p Glass </dev/null >/dev/null 2>&1 &`);
+                return sendResponse(id, {
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Developer responded via Telegram:\n• Selected Option: "${statusData.answer}" (index: ${statusData.answerIndex})\n• Question: "${question}"`,
+                    },
+                  ],
+                });
+              }
+            } catch (err) {
+              // Ignora erros transitórios no polling
+            }
+          }, pollIntervalMs);
+
+        } catch (e) {
+          return sendResponse(id, {
+            content: [{ type: 'text', text: `Network error sending question to Plim Cloud: ${e.message}` }],
+            isError: true,
+          });
+        }
+      })();
+      return;
+    }
+
     if (name === 'plim_run') {
       const targetCmd = args.command;
       if (!targetCmd) {
@@ -120,23 +257,91 @@ function handleRequest(req) {
         });
       }
 
-      const escapedTarget = targetCmd.replace(/"/g, '\\"');
-      const cmd = `"${PLIM_BIN}" run ${targetCmd}`;
+      const retryOnFailure = args.retry_on_failure === true;
 
-      exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-        const exitCode = err ? err.code || 1 : 0;
-        const output = stdout || stderr || '';
-        const tail = output.split('\n').slice(-15).join('\n');
+      function executeAndHandle(attempt = 1) {
+        const cmd = `"${PLIM_BIN}" run ${targetCmd}`;
 
-        return sendResponse(id, {
-          content: [
-            {
-              type: 'text',
-              text: `Command finished with exit code ${exitCode}.\nDeveloper was notified via Telegram.\n\nOutput snippet:\n${tail}`,
-            },
-          ],
+        exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, async (err, stdout, stderr) => {
+          const exitCode = err ? err.code || 1 : 0;
+          const output = stdout || stderr || '';
+          const tail = output.split('\n').slice(-15).join('\n');
+
+          // Se falhou e retry_on_failure está ativado, pergunta no Telegram
+          if (exitCode !== 0 && retryOnFailure && attempt === 1) {
+            const { apiKey, apiUrl } = loadPlimConfig();
+            if (apiKey) {
+              try {
+                const askRes = await fetch(`${apiUrl}/api/ask`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    type: 'retry',
+                    command: targetCmd,
+                    question: `O comando falhou com exit code ${exitCode}. Deseja repetir?`,
+                  }),
+                });
+                const askData = await askRes.json();
+                if (askData.ok && askData.id) {
+                  // Aguarda resposta do usuário por até 60 segundos
+                  const startPoll = Date.now();
+                  const pollInterval = setInterval(async () => {
+                    if ((Date.now() - startPoll) > 60000) {
+                      clearInterval(pollInterval);
+                      return sendResponse(id, {
+                        content: [
+                          {
+                            type: 'text',
+                            text: `Command failed with exit code ${exitCode}. (Developer did not respond to retry prompt within 60s).\n\nOutput snippet:\n${tail}`,
+                          },
+                        ],
+                      });
+                    }
+
+                    try {
+                      const checkRes = await fetch(`${apiUrl}/api/ask/${askData.id}`, {
+                        headers: { 'Authorization': `Bearer ${apiKey}` },
+                      });
+                      const checkData = await checkRes.json();
+                      if (checkData.ok && checkData.status === 'answered') {
+                        clearInterval(pollInterval);
+                        if (checkData.answer === 'retry') {
+                          // Usuário clicou em "Repetir" pelo Telegram!
+                          executeAndHandle(attempt + 1);
+                        } else {
+                          return sendResponse(id, {
+                            content: [
+                              {
+                                type: 'text',
+                                text: `Command failed with exit code ${exitCode}. (Developer canceled retry via Telegram).\n\nOutput snippet:\n${tail}`,
+                              },
+                            ],
+                          });
+                        }
+                      }
+                    } catch (e) {}
+                  }, 2000);
+                  return;
+                }
+              } catch (e) {}
+            }
+          }
+
+          return sendResponse(id, {
+            content: [
+              {
+                type: 'text',
+                text: `Command finished with exit code ${exitCode}.${attempt > 1 ? ` (Re-executed after Telegram retry approval)` : ''}\nDeveloper was notified via Telegram.\n\nOutput snippet:\n${tail}`,
+              },
+            ],
+          });
         });
-      });
+      }
+
+      executeAndHandle(1);
       return;
     }
 

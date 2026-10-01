@@ -20,6 +20,20 @@ interface UserRecord {
   upgradedAt?: number;
 }
 
+interface AskRecord {
+  id: string;
+  chatId: number;
+  question: string;
+  options: string[];
+  status: 'pending' | 'answered' | 'expired';
+  answer?: string;
+  answerIndex?: number;
+  createdAt: number;
+  messageId?: number;
+  type?: 'question' | 'retry';
+  command?: string;
+}
+
 const app = new Hono<{ Bindings: Bindings }>();
 
 // Helper para enviar mensagens via Telegram Bot API
@@ -40,7 +54,48 @@ async function sendTelegramMessage(
       reply_markup: extra?.reply_markup,
     }),
   });
-  return response.json();
+  return response.json() as Promise<any>;
+}
+
+// Helper para editar texto de mensagem existente
+async function editTelegramMessageText(
+  token: string,
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  extra?: { reply_markup?: any; parse_mode?: string }
+) {
+  const url = `https://api.telegram.org/bot${token}/editMessageText`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: extra?.parse_mode ?? 'HTML',
+      reply_markup: extra?.reply_markup,
+    }),
+  });
+  return response.json() as Promise<any>;
+}
+
+// Helper para responder Callback Query de Inline Keyboard
+async function answerTelegramCallbackQuery(
+  token: string,
+  callbackQueryId: string,
+  text?: string
+) {
+  const url = `https://api.telegram.org/bot${token}/answerCallbackQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text,
+    }),
+  });
+  return response.json() as Promise<any>;
 }
 
 // Helper para enviar fatura do Telegram Stars (XTR)
@@ -137,6 +192,68 @@ app.post('/webhook', async (c) => {
         ok: true,
       }),
     });
+    return c.json({ ok: true });
+  }
+
+  // 2. Tratamento de Callback Query (Botões Inline / Perguntas Interativas & Retry)
+  if (update?.callback_query) {
+    const cb = update.callback_query;
+    const data: string = cb.data || '';
+    const fromId = cb.from?.id;
+    const msgId = cb.message?.message_id;
+
+    if (data.startsWith('ask:') || data.startsWith('retry:')) {
+      const parts = data.split(':');
+      const action = parts[0];
+      const askId = parts[1];
+      const choice = parts[2];
+
+      const recordStr = await c.env.PLIM_KV.get(`ask:${askId}`);
+      if (recordStr) {
+        const record: AskRecord = JSON.parse(recordStr);
+        if (record.status === 'pending') {
+          let selectedText = '';
+          if (action === 'ask') {
+            const optIdx = parseInt(choice, 10);
+            selectedText = record.options[optIdx] ?? choice;
+            record.status = 'answered';
+            record.answer = selectedText;
+            record.answerIndex = optIdx;
+          } else if (action === 'retry') {
+            record.status = 'answered';
+            record.answer = choice; // 'retry' | 'cancel'
+            selectedText = choice === 'retry' ? '🔁 Repetir Execução' : '🛑 Cancelado';
+          }
+
+          // Salva no KV por 1 hora
+          await c.env.PLIM_KV.put(`ask:${askId}`, JSON.stringify(record), { expirationTtl: 3600 });
+
+          // Confirma o callback para remover o loading no Telegram
+          await answerTelegramCallbackQuery(botToken, cb.id, `Opção selecionada: ${selectedText}`);
+
+          // Edita a mensagem removendo os botões inline e exibindo o status final
+          let updatedText = '';
+          if (action === 'ask') {
+            updatedText = `❓ <b>Pergunta do Agente Plim:</b>\n${escapeHtml(record.question)}\n\n✅ <b>Respondido:</b> <code>${escapeHtml(selectedText)}</code>`;
+          } else {
+            updatedText = `⚠️ <b>Comando com Falha:</b>\n<code>${escapeHtml(record.command || '')}</code>\n\n${choice === 'retry' ? '🔁 <b>Solicitada repetição da execução!</b>' : '🛑 <b>Execução cancelada/ignorada.</b>'}`;
+          }
+
+          if (fromId && msgId) {
+            await editTelegramMessageText(botToken, fromId, msgId, updatedText);
+          }
+          return c.json({ ok: true });
+        } else {
+          await answerTelegramCallbackQuery(botToken, cb.id, 'Esta ação já foi respondida!');
+          return c.json({ ok: true });
+        }
+      } else {
+        await answerTelegramCallbackQuery(botToken, cb.id, 'Pergunta expirada ou inexistente.');
+        return c.json({ ok: true });
+      }
+    }
+
+    await answerTelegramCallbackQuery(botToken, cb.id);
     return c.json({ ok: true });
   }
 
@@ -496,6 +613,136 @@ app.post('/api/connect', async (c) => {
   );
 
   return c.json({ ok: true, message: 'Terminal conectado com sucesso!' });
+});
+
+// ---------------------------------------------------------------------------
+// 4. API de Perguntas Interativas e Retry (plim_ask / retry)
+// ---------------------------------------------------------------------------
+
+// POST /api/ask - Dispara pergunta interativa com botões inline no Telegram
+app.post('/api/ask', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Token ausente. Use Authorization: Bearer <plim_token>' }, 401);
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  const chatIdStr = await c.env.PLIM_KV.get(`token:${token}`);
+  if (!chatIdStr) {
+    return c.json({ error: 'Token inválido ou não encontrado.' }, 401);
+  }
+
+  const chatId = parseInt(chatIdStr, 10);
+  const payload = await c.req.json<{
+    question?: string;
+    options?: string[];
+    type?: 'question' | 'retry';
+    command?: string;
+  }>();
+
+  if (!payload.question && !payload.command) {
+    return c.json({ error: 'Parâmetro question ou command é obrigatório.' }, 400);
+  }
+
+  const askId = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  const isRetry = payload.type === 'retry';
+  const options = payload.options && payload.options.length > 0 ? payload.options : ['Sim', 'Não'];
+
+  const record: AskRecord = {
+    id: askId,
+    chatId,
+    question: payload.question || `O comando falhou: ${payload.command}`,
+    options: isRetry ? ['Repetir', 'Cancelar'] : options,
+    status: 'pending',
+    createdAt: Date.now(),
+    type: isRetry ? 'retry' : 'question',
+    command: payload.command,
+  };
+
+  // Monta teclado inline
+  let inlineKeyboard: any[][] = [];
+  if (isRetry) {
+    inlineKeyboard = [
+      [
+        { text: '🔁 Repetir Execução', callback_data: `retry:${askId}:retry` },
+        { text: '🛑 Cancelar', callback_data: `retry:${askId}:cancel` },
+      ],
+    ];
+  } else {
+    // Organiza botões: se tiverem mais de 14 chars ou mais de 4 opções, 1 por linha; senão 2 por linha
+    const rowLimit = options.some((opt) => opt.length > 14) || options.length > 4 ? 1 : 2;
+    let currentRow: any[] = [];
+    for (let i = 0; i < options.length; i++) {
+      currentRow.push({
+        text: options[i],
+        callback_data: `ask:${askId}:${i}`,
+      });
+      if (currentRow.length >= rowLimit) {
+        inlineKeyboard.push(currentRow);
+        currentRow = [];
+      }
+    }
+    if (currentRow.length > 0) {
+      inlineKeyboard.push(currentRow);
+    }
+  }
+
+  let messageText = '';
+  if (isRetry) {
+    messageText = `⚠️ <b>Comando com Falha no Terminal:</b>\n<code>${escapeHtml(payload.command || '')}</code>\n\n<i>Deseja tentar executar novamente agora?</i>`;
+  } else {
+    messageText = `❓ <b>Pergunta do Agente Plim:</b>\n\n${escapeHtml(payload.question || '')}\n\n<i>Selecione uma opção abaixo:</i>`;
+  }
+
+  const tgRes = await sendTelegramMessage(c.env.TELEGRAM_BOT_TOKEN, chatId, messageText, {
+    reply_markup: { inline_keyboard: inlineKeyboard },
+  });
+
+  if (tgRes?.result?.message_id) {
+    record.messageId = tgRes.result.message_id;
+  }
+
+  // TTL de 15 minutos (900s)
+  await c.env.PLIM_KV.put(`ask:${askId}`, JSON.stringify(record), { expirationTtl: 900 });
+
+  return c.json({
+    ok: true,
+    id: askId,
+    status: 'pending',
+    messageId: record.messageId,
+  });
+});
+
+// GET /api/ask/:id - Consulta o status de uma pergunta ou pedido de retry
+app.get('/api/ask/:id', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Token ausente.' }, 401);
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  const chatIdStr = await c.env.PLIM_KV.get(`token:${token}`);
+  if (!chatIdStr) {
+    return c.json({ error: 'Token inválido.' }, 401);
+  }
+
+  const id = c.req.param('id');
+  const recordStr = await c.env.PLIM_KV.get(`ask:${id}`);
+  if (!recordStr) {
+    return c.json({ ok: false, error: 'Pergunta não encontrada ou expirada.' }, 404);
+  }
+
+  const record: AskRecord = JSON.parse(recordStr);
+  return c.json({
+    ok: true,
+    id: record.id,
+    status: record.status,
+    answer: record.answer,
+    answerIndex: record.answerIndex,
+    createdAt: record.createdAt,
+    type: record.type,
+    command: record.command,
+  });
 });
 
 export default app;

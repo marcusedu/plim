@@ -155,9 +155,20 @@ switch ($Action.ToLower()) {
 
     "-n" {
         $msg = $Arguments -join " "
-        Play-Sound "success"
-        Show-Toast "Plim" $msg
-        Send-RemoteNotify "🔔 Plim: $msg" "" "" "" "info"
+        $piped = if ($input) { ($input | Out-String).Trim() } else { "" }
+        if ($piped) {
+            Write-Output $piped
+            $lines = $piped -split "`r?`n"
+            $tail = ($lines | Select-Object -Last 15) -join "`n"
+            Play-Sound "success"
+            $toastMsg = if ($msg) { $msg } else { "Pipe concluído" }
+            Show-Toast "Plim" $toastMsg
+            Send-RemoteNotify "🔔 Plim: $toastMsg" "" $tail "" "info"
+        } else {
+            Play-Sound "success"
+            Show-Toast "Plim" $msg
+            Send-RemoteNotify "🔔 Plim: $msg" "" "" "" "info"
+        }
     }
 
     "test" {
