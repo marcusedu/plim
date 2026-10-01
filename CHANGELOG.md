@@ -5,6 +5,16 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.2.1] - 2026-10-01
+
+### 🐛 Corrigido
+- **Correção de Escopo de Variáveis na CLI (`ask_cli`)**:
+  - Movida a lógica do comando `plim ask` para a função dedicada `ask_cli()`, eliminando o erro `local: can only be used in a function`.
+  - Tratamento tolerante a vírgulas e colchetes nas opções passadas via terminal (ex: `plim ask 'Pergunta?' sim, nao`).
+  - Tratamento defensivo no parsing de resposta JSON do backend.
+- **Deploy em Produção do Cloudflare Worker**:
+  - Publicação da nova versão com os endpoints `/api/ask`, `/api/ask/:id` e `callback_query` em `https://plim-api.marcusedu.workers.dev`.
+
 ---
 
 ## [1.2.0] - 2026-10-01

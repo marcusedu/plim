@@ -10,7 +10,7 @@ CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
-PLIM_VERSION="1.2.0"
+PLIM_VERSION="1.2.1"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
@@ -309,6 +309,114 @@ start_mcp_server() {
 }
 
 # ---------------------------------------------------------------------------
+# Modo Pergunta Interativa (plim ask <pergunta> [opções...])
+# ---------------------------------------------------------------------------
+ask_cli() {
+    local question="$1"
+    shift 2>/dev/null || true
+
+    if [[ -z "$question" || "$question" == "-h" || "$question" == "--help" ]]; then
+        echo "Uso: plim ask \"Sua pergunta\" [opcao1] [opcao2] ..."
+        echo "Exemplo: plim ask \"Aplicar migração em produção?\" \"Sim\" \"Não\""
+        return 1
+    fi
+
+    if [[ -z "$PLIM_API_KEY" ]]; then
+        echo "❌ Erro: Plim não está conectado ao Telegram. Execute 'plim connect <token>' primeiro."
+        return 1
+    fi
+
+    # Constrói array de opções JSON (limpa vírgulas ou colchetes extras se digitados)
+    local options_json="[\"Sim\", \"Não\"]"
+    if [[ $# -gt 0 ]]; then
+        local opts=()
+        for opt in "$@"; do
+            local cleaned="${opt#,}"
+            cleaned="${cleaned%,}"
+            cleaned="${cleaned#[}"
+            cleaned="${cleaned%]}"
+            cleaned=$(echo "$cleaned" | tr -d '[]' | xargs 2>/dev/null || echo "$cleaned")
+            [[ -z "$cleaned" ]] && continue
+            opts+=("\"$(escape_json "$cleaned")\"")
+        done
+        if [[ ${#opts[@]} -gt 0 ]]; then
+            local joined=$(IFS=,; echo "${opts[*]}")
+            options_json="[${joined}]"
+        fi
+    fi
+
+    local safe_q=$(escape_json "$question")
+    local payload="{\"question\":\"${safe_q}\",\"options\":${options_json},\"type\":\"question\"}"
+
+    echo "📱 Enviando pergunta para o seu Telegram..."
+    local res
+    res=$(curl -s -X POST "${API_URL}/api/ask" \
+        -H "Authorization: Bearer ${PLIM_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "${payload}")
+
+    local ask_id=""
+    if command -v python3 >/dev/null 2>&1; then
+        ask_id=$(python3 -c 'import json, sys
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get("id", ""))
+except Exception:
+    pass' <<< "$res")
+    else
+        ask_id=$(echo "$res" | sed -n 's/.*"id"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
+    fi
+
+    if [[ -z "$ask_id" ]]; then
+        echo "❌ Falha ao enviar pergunta: $res"
+        return 1
+    fi
+
+    play_sound "Ping"
+    echo "⏳ Pergunta enviada! Aguardando sua resposta no celular..."
+
+    local start_ts=$(date +%s)
+    local timeout_sec=300
+
+    while true; do
+        local now_ts=$(date +%s)
+        if (( now_ts - start_ts > timeout_sec )); then
+            echo ""
+            echo "⏱️ Tempo limite de espera esgotado (${timeout_sec}s)."
+            return 1
+        fi
+
+        sleep 2
+        local status_res
+        status_res=$(curl -s -X GET "${API_URL}/api/ask/${ask_id}" \
+            -H "Authorization: Bearer ${PLIM_API_KEY}")
+
+        local status_val=""
+        local answer_val=""
+        local answer_idx=0
+        if command -v python3 >/dev/null 2>&1; then
+            eval $(python3 -c 'import json, sys, shlex
+try:
+    d = json.loads(sys.stdin.read())
+    s = d.get("status", "")
+    a = d.get("answer", "")
+    i = d.get("answerIndex", 0)
+    print(f"status_val={shlex.quote(str(s))}; answer_val={shlex.quote(str(a))}; answer_idx={int(i)}")
+except Exception:
+    pass' <<< "$status_res")
+        fi
+
+        if [[ "$status_val" == "answered" ]]; then
+            echo ""
+            play_sound "success"
+            echo "🎉 Resposta recebida pelo Telegram: ${answer_val}"
+            return "$answer_idx"
+        fi
+        printf "."
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Verificação Diária Automática e Auto-Update
 # ---------------------------------------------------------------------------
 check_update_daily() {
@@ -451,89 +559,7 @@ case "$1" in
 
     ask|--ask)
         shift
-        question="$1"
-        shift
-        if [[ -z "$question" ]]; then
-            echo "Uso: plim ask \"Sua pergunta\" [opcao1] [opcao2] ..."
-            echo "Exemplo: plim ask \"Aplicar migração em produção?\" \"Sim\" \"Não\""
-            return 1 2>/dev/null || exit 1
-        fi
-
-        if [[ -z "$PLIM_API_KEY" ]]; then
-            echo "❌ Erro: Plim não está conectado ao Telegram. Execute 'plim connect <token>' primeiro."
-            return 1 2>/dev/null || exit 1
-        fi
-
-        # Constrói array de opções JSON
-        local options_json="[\"Sim\", \"Não\"]"
-        if [[ $# -gt 0 ]]; then
-            local opts=()
-            for opt in "$@"; do
-                opts+=("\"$(escape_json "$opt")\"")
-            done
-            local joined=$(IFS=,; echo "${opts[*]}")
-            options_json="[${joined}]"
-        fi
-
-        local safe_q=$(escape_json "$question")
-        local payload="{\"question\":\"${safe_q}\",\"options\":${options_json},\"type\":\"question\"}"
-
-        echo "📱 Enviando pergunta para o seu Telegram..."
-        local res
-        res=$(curl -s -X POST "${API_URL}/api/ask" \
-            -H "Authorization: Bearer ${PLIM_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${payload}")
-
-        local ask_id=""
-        if command -v python3 >/dev/null 2>&1; then
-            ask_id=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("id",""))' <<< "$res")
-        else
-            ask_id=$(echo "$res" | sed -n 's/.*"id"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
-        fi
-
-        if [[ -z "$ask_id" ]]; then
-            echo "❌ Falha ao enviar pergunta: $res"
-            return 1 2>/dev/null || exit 1
-        fi
-
-        play_sound "Ping"
-        echo "⏳ Pergunta enviada! Aguardando sua resposta no celular..."
-
-        local answered=false
-        local start_ts=$(date +%s)
-        local timeout_sec=300
-
-        while true; do
-            local now_ts=$(date +%s)
-            if (( now_ts - start_ts > timeout_sec )); then
-                echo ""
-                echo "⏱️ Tempo limite de espera esgotado (${timeout_sec}s)."
-                return 1 2>/dev/null || exit 1
-            fi
-
-            sleep 2
-            local status_res
-            status_res=$(curl -s -X GET "${API_URL}/api/ask/${ask_id}" \
-                -H "Authorization: Bearer ${PLIM_API_KEY}")
-
-            local status_val=""
-            local answer_val=""
-            local answer_idx=0
-            if command -v python3 >/dev/null 2>&1; then
-                status_val=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("status",""))' <<< "$status_res")
-                answer_val=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("answer",""))' <<< "$status_res")
-                answer_idx=$(python3 -c 'import json, sys; d=json.loads(sys.stdin.read()); print(d.get("answerIndex",0))' <<< "$status_res")
-            fi
-
-            if [[ "$status_val" == "answered" ]]; then
-                echo ""
-                play_sound "success"
-                echo "🎉 Resposta recebida pelo Telegram: ${answer_val}"
-                return "$answer_idx" 2>/dev/null || exit "$answer_idx"
-            fi
-            printf "."
-        done
+        ask_cli "$@"
         ;;
 
     update|--update)
