@@ -46,9 +46,19 @@ git push production main | plim -n "Deploy enviado para produção"
 
 ---
 
+### 4. Interactive Questions on Telegram
+Ask the developer multiple-choice questions directly on their mobile phone:
+```bash
+plim ask "Deseja rodar o deploy em produção?" "Sim" "Não" "Testar primeiro"
+```
+Or use the MCP tool `plim_ask`.
+
+---
+
 ## Best Practices for AI Agents
 
 - **Default to `plim run` for slow tasks**: If a task typically takes >10s, prefix with `plim run`.
+- **Ask confirmation for destructive actions**: Use `plim ask` or `plim_ask` when deploying, modifying production DBs, or making irreversible changes.
 - **Do not wrap fast commands**: Do NOT use `plim run` for quick commands like `ls`, `git status`, `cat`, `mkdir`.
 - **Notify at the end of multi-step jobs**: When completing a multi-file refactor or migration, send a final `plim -n "..."`.
 - **Keep messages concise**: Include what was accomplished and whether human action is needed.
@@ -64,4 +74,5 @@ plim mcp
 
 ### Supported MCP Tools:
 - `plim_notify`: Send a custom alert with title, message, and status (`success`, `error`, `info`).
-- `plim_run`: Execute a heavy command and automatically notify the human upon completion.
+- `plim_run`: Execute a heavy command and automatically notify the human upon completion. Supports `retry_on_failure` to send interactive retry buttons to Telegram if a command fails.
+- `plim_ask`: Ask the human interactive multiple-choice questions on Telegram with inline buttons and await their response.

@@ -21,3 +21,10 @@ This environment has **Plim** installed for terminal and mobile notifications.
    ```bash
    plim -n "⚠️ Bloqueado: [descreva o que precisa de revisão]"
    ```
+
+4. **Interactive Questions & Confirmation**:
+   If you need the developer to choose an option or confirm a critical step:
+   ```bash
+   plim ask "Deseja aplicar as migrações no banco de dados?" "Sim" "Não"
+   ```
+   Or use the MCP tool `plim_ask` with selectable options. Buttons will be sent to the developer's Telegram and wait for response.

@@ -116,11 +116,12 @@ Basta adicionar a configuração MCP (disponível em `mcp.json`):
 ```
 
 O agente ganhará automaticamente as ferramentas:
+- **`plim_ask`**: Faz perguntas com botões de múltipla escolha no Telegram e aguarda a decisão do desenvolvedor.
+- **`plim_run`**: Executa comando pesado, notifica na conclusão e oferece botão interativo de Retry no Telegram se houver falha.
 - **`plim_notify`**: Envia alerta com status para o celular do dev.
-- **`plim_run`**: Executa comando pesado e notifica na conclusão.
 
 ### 2. Para Claude Code / Cursor Agent (via `CLAUDE.md`)
-Adicione o arquivo `CLAUDE.md` na raiz do seu projeto. O agente usará o Plim automaticamente para monitorar tarefas demoradas e avisar no seu bolso quando terminar!
+Adicione o arquivo `CLAUDE.md` na raiz do seu projeto. O agente usará o Plim automaticamente para monitorar tarefas demoradas, fazer perguntas pelo Telegram e avisar no seu bolso quando terminar!
 
 ---
 
@@ -129,10 +130,12 @@ Adicione o arquivo `CLAUDE.md` na raiz do seu projeto. O agente usará o Plim au
 ```text
 plim/
 ├── bin/
-│   └── plim              # Script CLI executável em Zsh
+│   ├── plim              # Script CLI executável (macOS, Linux, WSL)
+│   ├── plim-mcp.js       # Servidor MCP stdio para agentes de IA
+│   └── plim.ps1          # Script nativo PowerShell para Windows
 ├── worker/               # Backend Cloudflare Worker (TypeScript + Hono)
 │   ├── src/
-│   │   └── index.ts      # Webhook do Telegram + API de Notificações
+│   │   └── index.ts      # Webhook do Telegram + Perguntas Interativas + API de Notificações
 │   ├── wrangler.toml     # Configuração e KV Bindings
 │   ├── package.json
 │   └── README.md         # Instruções de deploy do Worker
@@ -149,10 +152,14 @@ Para publicar o backend no seu Cloudflare, veja as instruções em [worker/READM
 
 | Comando | Descrição |
 | --- | --- |
+| `plim ask <pergunta> [opções]` | Envia pergunta interativa com botões no Telegram e aguarda resposta |
 | `plim run <comando>` | Executa comando, mede tempo, detecta status e notifica com log |
 | `plim connect <token>` | Conecta ao bot [@plim_the_bot](https://t.me/plim_the_bot) |
 | `plim mcp` | Inicia servidor MCP para agentes de IA (Claude, Cursor, Windsurf) |
-| `plim -n [mensagem]` | Dispara notificação no Mac e Telegram (aceita pipe) |
+| `plim [mensagem]` | Notificação rápida (ex: `plim 'Deploy pronto'`) |
+| `plim -n [mensagem]` | Dispara notificação no Mac e Telegram |
+| `comando \| plim` | Faz streaming em tempo real, toca som e notifica no término |
+| `comando \| plim 'Deploy'` | Lê o pipe e notifica com mensagem customizada |
 | `plim update` | Verifica e atualiza o Plim para a versão mais recente |
 | `plim version` / `-v` | Exibe a versão instalada do Plim |
 | `plim test` | Testa os canais de áudio, notificação local e Telegram |
