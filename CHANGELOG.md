@@ -11,6 +11,11 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - **Alertas Administrativos em Tempo Real**:
   - Notificação instantânea enviada exclusivamente para o administrador (`ADMIN_CHAT_ID`) sempre que um novo usuário entrar no bot Telegram (`/start`) ou configurar seu terminal com sucesso (`plim connect <token>`).
   - Notificação instantânea com detalhes da transação (usuário, chat ID e valor em Telegram Stars) para o administrador sempre que alguém assinar ou fizer upgrade para o **Plim PRO**.
+- **Pacote NPM e Execução via `npx plim-mcp`**:
+  - Adicionado `package.json` na raiz tornando o Plim MCP executável via Node.js / npx sem dependências externas (`npx plim-mcp`).
+  - Resolução aprimorada do binário `plim` e fallback gracioso com áudio nativo (`afplay` / sons de sistema) e disparo HTTP direto caso o script CLI não esteja no PATH.
+- **Manifesto de Integração HOL Guard**:
+  - Criado o arquivo declarativo `integrations/hol-guard/mcp.plim.json` em total conformidade com o schema oficial do [HOL Guard](https://github.com/hashgraph-online/hol-guard).
 
 ---
 

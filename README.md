@@ -115,6 +115,18 @@ Basta adicionar a configuração MCP (disponível em `mcp.json`):
 }
 ```
 
+*Ou diretamente via `npx` (sem precisar instalar a CLI antes):*
+```json
+{
+  "mcpServers": {
+    "plim": {
+      "command": "npx",
+      "args": ["-y", "plim-mcp"]
+    }
+  }
+}
+```
+
 O agente ganhará automaticamente as ferramentas:
 - **`plim_ask`**: Faz perguntas com botões de múltipla escolha no Telegram e aguarda a decisão do desenvolvedor.
 - **`plim_run`**: Executa comando pesado, notifica na conclusão e oferece botão interativo de Retry no Telegram se houver falha.

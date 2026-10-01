@@ -1,0 +1,39 @@
+{
+  "name": "plim-mcp",
+  "version": "1.3.0",
+  "description": "Native desktop audio alerts, interactive Telegram questions, and command monitoring for AI coding agents (Claude, Cursor, Windsurf, Antigravity)",
+  "bin": {
+    "plim-mcp": "./bin/plim-mcp.js"
+  },
+  "main": "./bin/plim-mcp.js",
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "make test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "plim",
+    "ai-agents",
+    "notifications",
+    "claude",
+    "cursor",
+    "telegram",
+    "cli"
+  ],
+  "author": "Marcus Duarte",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcusedu/plim.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marcusedu/plim/issues"
+  },
+  "homepage": "https://plim.sh"
+}

@@ -11,7 +11,38 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const PLIM_BIN = path.resolve(__dirname, 'plim');
+function resolvePlimBin() {
+  const localBin = path.resolve(__dirname, 'plim');
+  if (fs.existsSync(localBin)) return localBin;
+
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, '.local', 'bin', 'plim'),
+    '/usr/local/bin/plim',
+    '/opt/homebrew/bin/plim',
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return 'plim';
+}
+
+const PLIM_BIN = resolvePlimBin();
+
+function playDesktopSound(name = 'Glass') {
+  if (process.platform === 'darwin') {
+    const soundPath = `/System/Library/Sounds/${name}.aiff`;
+    if (fs.existsSync(soundPath)) {
+      exec(`afplay "${soundPath}" </dev/null >/dev/null 2>&1 &`);
+    } else {
+      exec(`afplay /System/Library/Sounds/Glass.aiff </dev/null >/dev/null 2>&1 &`);
+    }
+  } else if (process.platform === 'linux') {
+    exec(`paplay /usr/share/sounds/freedesktop/stereo/complete.oga </dev/null >/dev/null 2>&1 || aplay /usr/share/sounds/alsa/Front_Center.wav </dev/null >/dev/null 2>&1 &`);
+  } else if (process.platform === 'win32') {
+    exec(`powershell -c "[console]::beep(800, 300)" </dev/null >/dev/null 2>&1 &`);
+  }
+}
 
 function loadPlimConfig() {
   const home = os.homedir();
@@ -151,8 +182,35 @@ function handleRequest(req) {
       const escapedMsg = msg.replace(/"/g, '\\"');
       const cmd = `"${PLIM_BIN}" -n "${escapedMsg}"`;
 
-      exec(cmd, (err, stdout, stderr) => {
+      exec(cmd, async (err, stdout, stderr) => {
         if (err) {
+          // Fallback gracioso: tenta enviar diretamente via API HTTP e som nativo se plim CLI não estiver presente
+          const { apiKey, apiUrl } = loadPlimConfig();
+          playDesktopSound(args.status === 'error' ? 'Sosumi' : 'Glass');
+
+          if (apiKey) {
+            try {
+              const res = await fetch(`${apiUrl}/api/notify`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  title: args.title || '🔔 Plim',
+                  body: args.message,
+                  status: args.status || 'info',
+                }),
+              });
+              const data = await res.json();
+              if (data.ok) {
+                return sendResponse(id, {
+                  content: [{ type: 'text', text: `Notification successfully sent to developer's mobile phone: "${msg}"` }],
+                });
+              }
+            } catch (netErr) {}
+          }
+
           return sendResponse(id, {
             content: [{ type: 'text', text: `Failed to send notification: ${err.message}` }],
             isError: true,
@@ -179,7 +237,7 @@ function handleRequest(req) {
       }
 
       // Toca som de alerta no Mac avisando sobre pergunta pendente
-      exec(`"${PLIM_BIN}" -p Ping </dev/null >/dev/null 2>&1 &`);
+      playDesktopSound('Ping');
 
       (async () => {
         try {
@@ -223,7 +281,7 @@ function handleRequest(req) {
               if (statusData.ok && statusData.status === 'answered') {
                 clearInterval(pollTimer);
                 // Som de confirmação de resposta recebida
-                exec(`"${PLIM_BIN}" -p Glass </dev/null >/dev/null 2>&1 &`);
+                playDesktopSound('Glass');
                 return sendResponse(id, {
                   content: [
                     {
