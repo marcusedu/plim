@@ -185,10 +185,17 @@ send_telegram_direct() {
         text="${text}${nl}${nl}<pre>${escaped_extra}</pre>"
     fi
 
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" \
-        --data-urlencode "text=${text}" \
-        -d parse_mode="HTML" >/dev/null 2>&1 &
+    if [[ "$SYNC_NOTIFY" == "true" ]]; then
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            -d parse_mode="HTML" >/dev/null 2>&1
+    else
+        nohup curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            -d parse_mode="HTML" >/dev/null 2>&1 &
+    fi
 }
 
 send_remote_notification() {
@@ -207,10 +214,17 @@ send_remote_notification() {
 
         local payload="{\"title\":\"${safe_title}\",\"body\":\"${safe_body}\",\"log\":\"${safe_extra}\",\"duration\":\"${safe_dur}\",\"status\":\"${notif_status:-info}\"}"
 
-        curl -s -X POST "${API_URL}/api/notify" \
-            -H "Authorization: Bearer ${PLIM_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${payload}" >/dev/null 2>&1 &
+        if [[ "$SYNC_NOTIFY" == "true" ]]; then
+            curl -s -X POST "${API_URL}/api/notify" \
+                -H "Authorization: Bearer ${PLIM_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${payload}" >/dev/null 2>&1
+        else
+            nohup curl -s -X POST "${API_URL}/api/notify" \
+                -H "Authorization: Bearer ${PLIM_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${payload}" >/dev/null 2>&1 &
+        fi
         return 0
     fi
 
@@ -412,7 +426,7 @@ case "$1" in
 
     connect)
         shift
-        local token="$1"
+        token="$1"
         if [[ -z "$token" ]]; then
             echo "Uso: plim connect <SEU_TOKEN>"
             echo "Exemplo: plim connect plim_live_abc123..."
@@ -431,7 +445,7 @@ EOF
         echo "✅ Configuração salva em $CONFIG_FILE"
         echo "📡 Conectando ao Plim Cloud..."
 
-        local res=$(curl -s -X POST "${API_URL}/api/connect" \
+        res=$(curl -s -X POST "${API_URL}/api/connect" \
             -H "Content-Type: application/json" \
             -d "{\"token\": \"$token\"}")
 
@@ -445,8 +459,8 @@ EOF
 
     --notification|-n)
         shift
-        local message="$*"
-        local input_data=""
+        message="$*"
+        input_data=""
 
         # Se houver entrada vinda de pipe (ex: comando | plim -n "Fim")
         if [[ ! -t 0 ]]; then
@@ -459,7 +473,7 @@ EOF
         # Interpreta \n se passado na mensagem
         [[ -n "$message" ]] && message=$(printf "%b" "$message")
 
-        local local_msg="${message:-Notificação recebida}"
+        local_msg="${message:-Notificação recebida}"
         if [[ -z "$message" && -n "$input_data" ]]; then
             local_msg=$(echo "$input_data" | tail -n 2)
         fi
@@ -490,11 +504,11 @@ EOF
 
         if [[ -n "$PLIM_API_KEY" ]]; then
             echo "📱 Enviando notificação de teste via Plim Cloud (Worker)..."
-            send_remote_notification "🔔 Teste do Plim" "A integração com o Plim Cloud está 100% funcionando! 🎉" "" "" "info"
+            SYNC_NOTIFY=true send_remote_notification "🔔 Teste do Plim" "A integração com o Plim Cloud está 100% funcionando! 🎉" "" "" "info"
             echo "✅ Requisição enviada para a API."
         elif [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
             echo "📱 Enviando notificação de teste direto para o Telegram..."
-            send_telegram_direct "🔔 Teste do Plim" "A integração com seu bot do Telegram está funcionando! 🎉" ""
+            SYNC_NOTIFY=true send_telegram_direct "🔔 Teste do Plim" "A integração com seu bot do Telegram está funcionando! 🎉" ""
             echo "✅ Mensagem enviada para o Telegram (Chat ID: $TELEGRAM_CHAT_ID)."
         else
             echo "⚠️  Nenhum serviço remoto configurado."
@@ -507,8 +521,8 @@ EOF
     config|--config)
         shift
         if [[ "$1" == "set" ]]; then
-            local token="$2"
-            local chat_id="$3"
+            token="$2"
+            chat_id="$3"
             if [[ -z "$token" || -z "$chat_id" ]]; then
                 echo "Uso: plim config set <BOT_TOKEN> <CHAT_ID>"
                 return 1 2>/dev/null || exit 1
@@ -524,7 +538,7 @@ EOF
         fi
 
         if [[ "$1" == "set-url" ]]; then
-            local url="$2"
+            url="$2"
             if [[ -z "$url" ]]; then
                 echo "Uso: plim config set-url <URL_DA_API>"
                 return 1 2>/dev/null || exit 1
