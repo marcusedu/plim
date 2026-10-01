@@ -1,0 +1,14 @@
+name = "plim-api"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+
+# KV Namespace para armazenar usuários, tokens e contadores de limite diário
+[[kv_namespaces]]
+binding = "PLIM_KV"
+id = "627e2af0f4264eddb33ad0846efeb452"
+
+[vars]
+FREE_TIER_DAILY_LIMIT = 50
+PRO_TIER_DAILY_LIMIT = 5000
+PRO_PRICE_STARS = 150
+ADMIN_CHAT_ID = "517936688"
