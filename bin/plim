@@ -10,7 +10,7 @@ CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
-PLIM_VERSION="1.0.0"
+PLIM_VERSION="1.1.0"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
