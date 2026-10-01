@@ -5,6 +5,15 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.3.0] - 2026-10-01
+
+### ✨ Adicionado
+- **Alertas Administrativos em Tempo Real**:
+  - Notificação instantânea enviada exclusivamente para o administrador (`ADMIN_CHAT_ID`) sempre que um novo usuário entrar no bot Telegram (`/start`) ou configurar seu terminal com sucesso (`plim connect <token>`).
+  - Notificação instantânea com detalhes da transação (usuário, chat ID e valor em Telegram Stars) para o administrador sempre que alguém assinar ou fizer upgrade para o **Plim PRO**.
+
+---
+
 ## [1.2.1] - 2026-10-01
 
 ### 🐛 Corrigido

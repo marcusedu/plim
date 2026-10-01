@@ -129,7 +129,7 @@ function handleRequest(req) {
       },
       serverInfo: {
         name: 'plim-mcp',
-        version: '1.2.1',
+        version: '1.3.0',
       },
     });
   }

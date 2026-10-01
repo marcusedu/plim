@@ -18,6 +18,7 @@ interface UserRecord {
   plan: 'free' | 'pro';
   createdAt: number;
   upgradedAt?: number;
+  connectedAt?: number;
 }
 
 interface AskRecord {
@@ -267,8 +268,8 @@ app.post('/webhook', async (c) => {
   // 2. Tratamento de Pagamento Concluído com Sucesso
   if (message.successful_payment) {
     let userStr = await c.env.PLIM_KV.get(`user:${chatId}`);
-    if (userStr) {
-      const user: UserRecord = JSON.parse(userStr);
+    let user: UserRecord | null = userStr ? JSON.parse(userStr) : null;
+    if (user) {
       user.plan = 'pro';
       user.upgradedAt = Date.now();
       await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
@@ -284,6 +285,20 @@ O seu plano foi atualizado com sucesso:
 Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
 
     await sendTelegramMessage(botToken, chatId, successMsg);
+
+    // Notifica o administrador sobre a nova assinatura PRO
+    const adminChatId = c.env.ADMIN_CHAT_ID ? parseInt(c.env.ADMIN_CHAT_ID, 10) : 517936688;
+    if (adminChatId) {
+      const name = user?.firstName || message.from?.first_name || 'Anônimo';
+      const handle = (user?.username || message.from?.username) ? `@${user?.username || message.from?.username}` : `ID: ${chatId}`;
+      const amount = message.successful_payment.total_amount;
+      const currency = message.successful_payment.currency;
+
+      const adminProMsg = `⭐ <b>NOVA ASSINATURA PLIM PRO!</b> 💰🎉\n\n👤 <b>Usuário:</b> ${escapeHtml(name)} (${escapeHtml(handle)})\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n⭐ <b>Valor:</b> ${amount} ${currency}\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+
+      await sendTelegramMessage(botToken, adminChatId, adminProMsg);
+    }
+
     return c.json({ ok: true });
   }
 
@@ -309,6 +324,16 @@ Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
     };
     await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(newUser));
     await c.env.PLIM_KV.put(`token:${token}`, chatId.toString());
+
+    // Notifica o administrador que um novo usuário aderiu ao bot no Telegram
+    const adminChatId = c.env.ADMIN_CHAT_ID ? parseInt(c.env.ADMIN_CHAT_ID, 10) : 517936688;
+    if (adminChatId) {
+      const name = newUser.firstName || 'Anônimo';
+      const handle = newUser.username ? `@${newUser.username}` : `ID: ${chatId}`;
+      const adminNotice = `👋 <b>Novo Usuário Aderiu ao Plim!</b>\n\n👤 <b>Nome:</b> ${escapeHtml(name)}\n📱 <b>Usuário:</b> ${escapeHtml(handle)}\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+      await sendTelegramMessage(botToken, adminChatId, adminNotice);
+    }
+
     return newUser;
   }
 
@@ -606,11 +631,31 @@ app.post('/api/connect', async (c) => {
   }
 
   const chatId = parseInt(chatIdStr, 10);
+  let userStr = await c.env.PLIM_KV.get(`user:${chatId}`);
+  let user: UserRecord | null = userStr ? JSON.parse(userStr) : null;
+  const isFirstConnection = !user?.connectedAt;
+
+  if (user) {
+    user.connectedAt = Date.now();
+    await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
+  }
+
   await sendTelegramMessage(
     c.env.TELEGRAM_BOT_TOKEN,
     chatId,
     `🎉 <b>Terminal Conectado com Sucesso!</b>\n\nO seu Plim está configurado e pronto para uso!\nTente rodar:\n<code>plim run sleep 2 &amp;&amp; echo "Deploy finalizado!"</code>`
   );
+
+  // Notifica o administrador que o usuário configurou o terminal com sucesso
+  const adminChatId = c.env.ADMIN_CHAT_ID ? parseInt(c.env.ADMIN_CHAT_ID, 10) : 517936688;
+  if (adminChatId) {
+    const name = user?.firstName || 'Anônimo';
+    const handle = user?.username ? `@${user.username}` : `ID: ${chatId}`;
+    const statusBadge = isFirstConnection ? '🟢 Primeira Configuração' : '🔄 Reconexão';
+    const adminMsg = `💻 <b>Terminal Configurado com Sucesso!</b>\n\n${statusBadge}\n👤 <b>Usuário:</b> ${escapeHtml(name)} (${escapeHtml(handle)})\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${body.token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+
+    await sendTelegramMessage(c.env.TELEGRAM_BOT_TOKEN, adminChatId, adminMsg);
+  }
 
   return c.json({ ok: true, message: 'Terminal conectado com sucesso!' });
 });
