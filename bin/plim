@@ -10,6 +10,10 @@ CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
 [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
+PLIM_VERSION="1.0.0"
+GITHUB_REPO="marcusedu/plim"
+RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
+
 SOUNDS_DIR="/System/Library/Sounds"
 DEFAULT_API_URL="https://plim-api.marcusedu.workers.dev"
 API_URL="${PLIM_API_URL:-$DEFAULT_API_URL}"
@@ -286,12 +290,119 @@ start_mcp_server() {
 }
 
 # ---------------------------------------------------------------------------
+# Verificação Diária Automática e Auto-Update
+# ---------------------------------------------------------------------------
+check_update_daily() {
+    # Ignora checagem se estiver rodando comandos internos ou de ajuda
+    case "$1" in
+        update|--update|version|--version|-v|mcp) return 0 ;;
+    esac
+
+    local check_file="$CONFIG_DIR/.last_update_check"
+    local latest_file="$CONFIG_DIR/.latest_version"
+    local now
+    now=$(date +%s 2>/dev/null || echo 0)
+    local interval=86400 # 24 horas
+
+    # 1. Se já sabemos que existe uma versão mais recente em cache, avisa com elegância
+    if [[ -f "$latest_file" ]]; then
+        local remote_ver
+        remote_ver=$(cat "$latest_file" 2>/dev/null | tr -d '[:space:]')
+        if [[ -n "$remote_ver" && "$remote_ver" != "$PLIM_VERSION" ]]; then
+            printf "\n💡 \033[1;33mNova versão do Plim disponível:\033[0m %s → \033[1;32m%s\033[0m\n" "$PLIM_VERSION" "$remote_ver"
+            printf "   Execute \033[1;36mplim update\033[0m para atualizar.\n\n"
+        fi
+    fi
+
+    # 2. Verifica se passou 24h desde a última verificação
+    local last_check=0
+    [[ -f "$check_file" ]] && last_check=$(cat "$check_file" 2>/dev/null || echo 0)
+
+    if (( now - last_check > interval )); then
+        mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+        echo "$now" > "$check_file" 2>/dev/null || true
+
+        # Checagem em background desvinculada (detached subshell)
+        # Timeout rígido de 2s para NUNCA travar ou atrasar o comando do usuário
+        (
+            local r_ver
+            r_ver=$(curl -fsSL --connect-timeout 2 --max-time 3 "${RAW_BASE_URL}/VERSION" 2>/dev/null | tr -d '[:space:]')
+            if [[ -n "$r_ver" ]]; then
+                echo "$r_ver" > "$latest_file"
+            fi
+        ) >/dev/null 2>&1 &
+    fi
+}
+
+update_plim() {
+    echo "🔍 Verificando atualizações no GitHub (${GITHUB_REPO})..."
+    local remote_ver
+    remote_ver=$(curl -fsSL --connect-timeout 5 "${RAW_BASE_URL}/VERSION" 2>/dev/null | tr -d '[:space:]')
+
+    if [[ -z "$remote_ver" ]]; then
+        echo "❌ Não foi possível verificar a versão remota. Verifique sua conexão com a internet."
+        return 1
+    fi
+
+    if [[ "$remote_ver" == "$PLIM_VERSION" ]]; then
+        echo "✅ O Plim já está na versão mais recente (v${PLIM_VERSION})!"
+        rm -f "$CONFIG_DIR/.latest_version" 2>/dev/null || true
+        return 0
+    fi
+
+    echo "🚀 Atualizando Plim: v${PLIM_VERSION} → v${remote_ver}..."
+
+    # Resolve o caminho real do executável
+    local target="${BASH_SOURCE[0]:-$0}"
+    while [[ -h "$target" ]]; do
+        local dir="$(cd -P "$(dirname "$target")" && pwd)"
+        target="$(readlink "$target")"
+        [[ $target != /* ]] && target="$dir/$target"
+    done
+    local target_dir="$(cd -P "$(dirname "$target")" && pwd)"
+
+    local temp_bin
+    temp_bin=$(mktemp 2>/dev/null || mktemp -t plim_update.XXXXXX)
+
+    if curl -fsSL "${RAW_BASE_URL}/bin/plim" -o "$temp_bin"; then
+        chmod +x "$temp_bin"
+        mv "$temp_bin" "$target_dir/plim"
+
+        # Baixa também o script MCP se existir
+        curl -fsSL "${RAW_BASE_URL}/bin/plim-mcp.js" -o "$target_dir/plim-mcp.js" 2>/dev/null || true
+        chmod +x "$target_dir/plim-mcp.js" 2>/dev/null || true
+
+        # Limpa o arquivo de versão pendente
+        rm -f "$CONFIG_DIR/.latest_version" 2>/dev/null || true
+
+        echo "🎉 Plim atualizado com sucesso para a versão v${remote_ver}!"
+        return 0
+    else
+        rm -f "$temp_bin"
+        echo "❌ Falha ao baixar os arquivos da nova versão."
+        return 1
+    fi
+}
+
+# Executa checagem diária não-bloqueante
+check_update_daily "$1"
+
+# ---------------------------------------------------------------------------
 # Roteamento de Comandos CLI
 # ---------------------------------------------------------------------------
 case "$1" in
     run|--run)
         shift
         run_command "$@"
+        ;;
+
+    update|--update)
+        shift
+        update_plim "$@"
+        ;;
+
+    version|--version|-v)
+        echo "Plim v${PLIM_VERSION}"
         ;;
 
     mcp)
@@ -450,7 +561,8 @@ EOF
         echo "  comando | plim -n 'Deploy'     # Lê a saída do comando e notifica"
         echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
         echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
-        echo "  plim test                      # Testa som e notificações remotas"
+        echo "  plim update                    # Atualiza o Plim para a versão mais recente"
+        echo "  plim version                   # Exibe a versão atual do Plim (-v)"
         echo "  plim config                    # Exibe configuração atual"
         echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
         echo "  plim -l                        # Lista sons disponíveis"

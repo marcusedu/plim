@@ -153,6 +153,8 @@ Para publicar o backend no seu Cloudflare, veja as instruções em [worker/READM
 | `plim connect <token>` | Conecta ao bot [@plim_the_bot](https://t.me/plim_the_bot) |
 | `plim mcp` | Inicia servidor MCP para agentes de IA (Claude, Cursor, Windsurf) |
 | `plim -n [mensagem]` | Dispara notificação no Mac e Telegram (aceita pipe) |
+| `plim update` | Verifica e atualiza o Plim para a versão mais recente |
+| `plim version` / `-v` | Exibe a versão instalada do Plim |
 | `plim test` | Testa os canais de áudio, notificação local e Telegram |
 | `plim config` | Exibe a configuração atual ativa |
 | `plim config set-url <url>` | Altera a URL da API do Worker |

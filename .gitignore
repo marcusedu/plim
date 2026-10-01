@@ -20,3 +20,8 @@ Icon
 # Arquivos temporários e logs
 *.tmp
 *.log
+
+# Node.js e Cloudflare Wrangler
+node_modules/
+.wrangler/
+dist/
