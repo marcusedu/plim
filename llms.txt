@@ -1,0 +1,67 @@
+# Plim CLI - LLM & AI Agent Context
+
+> Plim is a productivity CLI tool that monitors long-running terminal commands (builds, tests, deploys, migrations), plays native system audio cues, and sends instant push notifications to the developer's mobile phone via Telegram.
+
+## Why AI Agents Should Use Plim
+
+When you (an AI agent, such as Claude Code, Cursor, Aider, Cline, or Antigravity) are executing tasks on behalf of a developer:
+1. **Long-running commands**: Commands that take more than 10 seconds (e.g., `npm test`, `docker build`, `cargo build`, `pytest`, `terraform apply`) leave the human waiting. By running them through Plim, the developer receives an instant phone notification with execution time, success/error status, and output snippet.
+2. **Task Completion**: When you finish an entire objective or complex refactoring, notify the developer so they know they can review your work.
+3. **Human Review Needed**: If you are blocked, need confirmation, or encounter an unexpected error, notify the developer.
+
+---
+
+## Command Reference for AI Agents
+
+### 1. Execute and Monitor a Heavy Command
+Wrap commands with `plim run`:
+```bash
+plim run npm run build
+plim run pytest tests/
+plim run docker compose up -d --build
+plim run cargo test --release
+```
+**What happens:**
+- Executes the command normally with live stdout/stderr.
+- Measures duration (e.g., `⏱ 2m 14s`).
+- Checks exit code: plays a success/error sound on developer's machine.
+- Sends a push notification with the last 15 lines of log to the developer's Telegram.
+
+### 2. Send Custom Completion or Progress Alert
+Notify the developer directly when a task is finished:
+```bash
+plim -n "🤖 Tarefa finalizada: 42 testes passando e refatoração concluída!"
+```
+
+If an error or blocker occurs:
+```bash
+plim -n "⚠️ Atenção: Falha de autenticação no banco. Preciso da sua intervenção."
+```
+
+### 3. Piping Logs to Plim
+Stream output from any command:
+```bash
+git push production main | plim -n "Deploy enviado para produção"
+```
+
+---
+
+## Best Practices for AI Agents
+
+- **Default to `plim run` for slow tasks**: If a task typically takes >10s, prefix with `plim run`.
+- **Do not wrap fast commands**: Do NOT use `plim run` for quick commands like `ls`, `git status`, `cat`, `mkdir`.
+- **Notify at the end of multi-step jobs**: When completing a multi-file refactor or migration, send a final `plim -n "..."`.
+- **Keep messages concise**: Include what was accomplished and whether human action is needed.
+
+---
+
+## MCP Server Integration
+
+Plim includes built-in Model Context Protocol (MCP) support via:
+```bash
+plim mcp
+```
+
+### Supported MCP Tools:
+- `plim_notify`: Send a custom alert with title, message, and status (`success`, `error`, `info`).
+- `plim_run`: Execute a heavy command and automatically notify the human upon completion.

@@ -268,6 +268,23 @@ run_command() {
     return $exit_code
 }
 
+start_mcp_server() {
+    local source="${BASH_SOURCE[0]:-$0}"
+    while [[ -h "$source" ]]; do
+        local dir="$(cd -P "$(dirname "$source")" && pwd)"
+        source="$(readlink "$source")"
+        [[ $source != /* ]] && source="$dir/$source"
+    done
+    local script_dir="$(cd -P "$(dirname "$source")" && pwd)"
+
+    if command -v node >/dev/null 2>&1; then
+        exec node "$script_dir/plim-mcp.js" "$@"
+    else
+        echo "Erro: Node.js é necessário para executar o servidor MCP do Plim."
+        return 1
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # Roteamento de Comandos CLI
 # ---------------------------------------------------------------------------
@@ -275,6 +292,11 @@ case "$1" in
     run|--run)
         shift
         run_command "$@"
+        ;;
+
+    mcp)
+        shift
+        start_mcp_server "$@"
         ;;
 
     connect)
@@ -427,6 +449,7 @@ EOF
         echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
         echo "  comando | plim -n 'Deploy'     # Lê a saída do comando e notifica"
         echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
+        echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
         echo "  plim test                      # Testa som e notificações remotas"
         echo "  plim config                    # Exibe configuração atual"
         echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"

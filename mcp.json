@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "plim": {
+      "command": "plim",
+      "args": ["mcp"]
+    }
+  }
+}

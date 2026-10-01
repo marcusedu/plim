@@ -97,6 +97,33 @@ plim -l
 
 ---
 
+## 🤖 Integração com Agentes de IA & MCP
+
+O Plim possui suporte nativo ao **Model Context Protocol (MCP)** e ao padrão **`llms.txt`**. Isso permite que agentes de IA autônomos (**Claude Code**, **Cursor**, **Windsurf**, **Cline**, **Aider**) notifiquem o seu celular quando terminarem tarefas pesadas ou precisarem de revisão humana.
+
+### 1. Como Servidor MCP (Claude Desktop, Cursor, Windsurf, Cline)
+Basta adicionar a configuração MCP (disponível em `mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "plim": {
+      "command": "plim",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+O agente ganhará automaticamente as ferramentas:
+- **`plim_notify`**: Envia alerta com status para o celular do dev.
+- **`plim_run`**: Executa comando pesado e notifica na conclusão.
+
+### 2. Para Claude Code / Cursor Agent (via `CLAUDE.md`)
+Adicione o arquivo `CLAUDE.md` na raiz do seu projeto. O agente usará o Plim automaticamente para monitorar tarefas demoradas e avisar no seu bolso quando terminar!
+
+---
+
 ## ☁️ Estrutura do Projeto
 
 ```text
@@ -124,6 +151,7 @@ Para publicar o backend no seu Cloudflare, veja as instruções em [worker/READM
 | --- | --- |
 | `plim run <comando>` | Executa comando, mede tempo, detecta status e notifica com log |
 | `plim connect <token>` | Conecta ao bot [@plim_the_bot](https://t.me/plim_the_bot) |
+| `plim mcp` | Inicia servidor MCP para agentes de IA (Claude, Cursor, Windsurf) |
 | `plim -n [mensagem]` | Dispara notificação no Mac e Telegram (aceita pipe) |
 | `plim test` | Testa os canais de áudio, notificação local e Telegram |
 | `plim config` | Exibe a configuração atual ativa |
