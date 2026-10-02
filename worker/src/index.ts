@@ -37,6 +37,26 @@ interface AskRecord {
   lang?: 'en' | 'pt';
 }
 
+interface ProgressStep {
+  label: string;
+  status: 'done' | 'active' | 'pending' | 'failed';
+}
+
+interface ProgressRecord {
+  id: string;
+  chatId: number;
+  messageId: number;
+  title: string;
+  percent: number;
+  status: 'running' | 'success' | 'error';
+  statusText?: string;
+  steps?: ProgressStep[];
+  startedAt: number;
+  lastUpdatedAt: number;
+  duration?: string;
+  lang?: 'en' | 'pt';
+}
+
 type SupportedLang = 'en' | 'pt';
 
 function getLang(user?: { lang?: 'en' | 'pt' } | null, langCode?: string | null): SupportedLang {
@@ -987,6 +1007,263 @@ app.get('/api/ask/:id', async (c) => {
     type: record.type,
     command: record.command,
   });
+});
+
+function formatDurationSec(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, '0')}m ${secs.toString().padStart(2, '0')}s`;
+}
+
+function renderProgressMessage(record: ProgressRecord): string {
+  const lang = record.lang || 'pt';
+  const icon = record.status === 'success' ? '✅' : record.status === 'error' ? '❌' : '🔄';
+
+  const totalBlocks = 16;
+  const pct = Math.min(Math.max(record.percent || 0, 0), 100);
+  const filledBlocks = Math.round((pct / 100) * totalBlocks);
+  const emptyBlocks = totalBlocks - filledBlocks;
+  const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+
+  let header = '';
+  if (record.status === 'success') {
+    header = `<b>${icon} ${record.title} [${lang === 'pt' ? 'Concluído' : 'Completed'}]</b>`;
+  } else if (record.status === 'error') {
+    header = `<b>${icon} ${record.title} [${lang === 'pt' ? 'Falha' : 'Failed'}]</b>`;
+  } else {
+    header = `<b>${icon} ${record.title} [${pct}%]</b>`;
+  }
+
+  let text = `${header}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n<code>[${bar}] ${pct}%</code>\n`;
+
+  if (record.steps && record.steps.length > 0) {
+    text += '\n';
+    for (const step of record.steps) {
+      let stepIcon = '◻️';
+      if (step.status === 'done') stepIcon = '✅';
+      else if (step.status === 'active') stepIcon = '⏳';
+      else if (step.status === 'failed') stepIcon = '❌';
+
+      text += `${stepIcon} ${step.label}\n`;
+    }
+  }
+
+  if (record.statusText) {
+    text += `\n<i>${record.statusText}</i>\n`;
+  }
+
+  const elapsedSec = Math.round((Date.now() - record.startedAt) / 1000);
+  const durStr = record.duration || formatDurationSec(elapsedSec);
+  text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏱️ ${lang === 'pt' ? 'Duração' : 'Duration'}: <b>${durStr}</b>`;
+
+  return text;
+}
+
+// ---------------------------------------------------------------------------
+// 5. API de Mensagens de Progresso Dinâmico (/api/progress/*)
+// ---------------------------------------------------------------------------
+
+// POST /api/progress/start - Inicia um painel de progresso com mensagem única editável
+app.post('/api/progress/start', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Token ausente.' }, 401);
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  const chatIdStr = await c.env.PLIM_KV.get(`token:${token}`);
+  if (!chatIdStr) {
+    return c.json({ error: 'Token inválido ou não encontrado.' }, 401);
+  }
+
+  const chatId = parseInt(chatIdStr, 10);
+  const userStr = await c.env.PLIM_KV.get(`user:${chatId}`);
+  const user: UserRecord | null = userStr ? JSON.parse(userStr) : null;
+  const lang = getLang(user, null);
+
+  const payload = await c.req.json<{
+    title?: string;
+    steps?: Array<string | ProgressStep>;
+    totalSteps?: number;
+    text?: string;
+    percent?: number;
+  }>();
+
+  const progId = 'prog_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+
+  const parsedSteps: ProgressStep[] = [];
+  if (Array.isArray(payload.steps)) {
+    payload.steps.forEach((s, idx) => {
+      if (typeof s === 'string') {
+        parsedSteps.push({
+          label: s,
+          status: idx === 0 ? 'active' : 'pending',
+        });
+      } else if (s && typeof s === 'object') {
+        parsedSteps.push({
+          label: s.label || `Passo ${idx + 1}`,
+          status: s.status || (idx === 0 ? 'active' : 'pending'),
+        });
+      }
+    });
+  }
+
+  const record: ProgressRecord = {
+    id: progId,
+    chatId,
+    messageId: 0,
+    title: payload.title || (lang === 'pt' ? 'Execução em Progresso' : 'Execution in Progress'),
+    percent: payload.percent || 0,
+    status: 'running',
+    statusText: payload.text,
+    steps: parsedSteps,
+    startedAt: Date.now(),
+    lastUpdatedAt: Date.now(),
+    lang,
+  };
+
+  const initialMsg = renderProgressMessage(record);
+  const tgRes = await sendTelegramMessage(c.env.TELEGRAM_BOT_TOKEN, chatId, initialMsg);
+
+  if (!tgRes.ok || !tgRes.result?.message_id) {
+    return c.json({ error: 'Falha ao despachar mensagem para o Telegram.', details: tgRes }, 502);
+  }
+
+  record.messageId = tgRes.result.message_id;
+  await c.env.PLIM_KV.put(`progress:${progId}`, JSON.stringify(record), { expirationTtl: 7200 });
+
+  return c.json({ ok: true, id: progId, messageId: record.messageId });
+});
+
+// POST /api/progress/update - Atualiza a mensagem existente sem poluir o chat
+app.post('/api/progress/update', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Token ausente.' }, 401);
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  const chatIdStr = await c.env.PLIM_KV.get(`token:${token}`);
+  if (!chatIdStr) {
+    return c.json({ error: 'Token inválido.' }, 401);
+  }
+
+  const payload = await c.req.json<{
+    id: string;
+    percent?: number;
+    step?: number;
+    totalSteps?: number;
+    text?: string;
+    steps?: ProgressStep[];
+  }>();
+
+  if (!payload.id) {
+    return c.json({ error: 'Parâmetro id é obrigatório.' }, 400);
+  }
+
+  const recordStr = await c.env.PLIM_KV.get(`progress:${payload.id}`);
+  if (!recordStr) {
+    return c.json({ error: 'Sessão de progresso não encontrada ou expirada.' }, 404);
+  }
+
+  const record: ProgressRecord = JSON.parse(recordStr);
+
+  if (payload.text !== undefined) record.statusText = payload.text;
+  if (Array.isArray(payload.steps)) record.steps = payload.steps;
+
+  if (payload.step && record.steps && record.steps.length > 0) {
+    const activeIdx = payload.step - 1;
+    record.steps = record.steps.map((st, idx) => {
+      if (idx < activeIdx) return { ...st, status: 'done' as const };
+      if (idx === activeIdx) return { ...st, status: 'active' as const };
+      return { ...st, status: 'pending' as const };
+    });
+  }
+
+  if (payload.percent !== undefined) {
+    record.percent = Math.min(Math.max(payload.percent, 0), 100);
+  } else if (payload.step && payload.totalSteps) {
+    record.percent = Math.round(((payload.step - 1) / payload.totalSteps) * 100);
+  } else if (payload.step && record.steps && record.steps.length > 0) {
+    record.percent = Math.round(((payload.step - 1) / record.steps.length) * 100);
+  }
+
+  record.lastUpdatedAt = Date.now();
+  const updatedMsg = renderProgressMessage(record);
+
+  // Edita a mensagem no Telegram
+  await editTelegramMessageText(c.env.TELEGRAM_BOT_TOKEN, record.chatId, record.messageId, updatedMsg);
+  await c.env.PLIM_KV.put(`progress:${payload.id}`, JSON.stringify(record), { expirationTtl: 7200 });
+
+  return c.json({ ok: true, id: record.id, percent: record.percent });
+});
+
+// POST /api/progress/finish - Finaliza a mensagem com status de sucesso ou erro
+app.post('/api/progress/finish', async (c) => {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Token ausente.' }, 401);
+  }
+
+  const token = authHeader.replace('Bearer ', '').trim();
+  const chatIdStr = await c.env.PLIM_KV.get(`token:${token}`);
+  if (!chatIdStr) {
+    return c.json({ error: 'Token inválido.' }, 401);
+  }
+
+  const payload = await c.req.json<{
+    id: string;
+    status?: 'success' | 'error';
+    text?: string;
+    duration?: string;
+    steps?: ProgressStep[];
+  }>();
+
+  if (!payload.id) {
+    return c.json({ error: 'Parâmetro id é obrigatório.' }, 400);
+  }
+
+  const recordStr = await c.env.PLIM_KV.get(`progress:${payload.id}`);
+  if (!recordStr) {
+    return c.json({ error: 'Sessão de progresso não encontrada ou expirada.' }, 404);
+  }
+
+  const record: ProgressRecord = JSON.parse(recordStr);
+
+  record.status = payload.status === 'error' ? 'error' : 'success';
+  if (record.status === 'success') {
+    record.percent = 100;
+    if (record.steps) {
+      record.steps = record.steps.map(st => ({ ...st, status: 'done' as const }));
+    }
+  } else {
+    // Se falhou e tem passos, o último ativo vira failed e os restantes pending
+    if (record.steps) {
+      let foundActive = false;
+      record.steps = record.steps.map(st => {
+        if (!foundActive && (st.status === 'active' || st.status === 'failed')) {
+          foundActive = true;
+          return { ...st, status: 'failed' as const };
+        }
+        return st;
+      });
+    }
+  }
+
+  if (payload.text !== undefined) record.statusText = payload.text;
+  if (payload.duration) record.duration = payload.duration;
+  if (Array.isArray(payload.steps)) record.steps = payload.steps;
+
+  record.lastUpdatedAt = Date.now();
+  const finalMsg = renderProgressMessage(record);
+
+  await editTelegramMessageText(c.env.TELEGRAM_BOT_TOKEN, record.chatId, record.messageId, finalMsg);
+  await c.env.PLIM_KV.put(`progress:${payload.id}`, JSON.stringify(record), { expirationTtl: 3600 });
+
+  return c.json({ ok: true, id: record.id, status: record.status });
 });
 
 export default app;
