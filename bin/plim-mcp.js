@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const SERVER_VERSION = '1.4.1';
+const SERVER_VERSION = '1.6.0';
 
 function resolvePlimBin() {
   const localBin = path.resolve(__dirname, 'plim');
@@ -176,6 +176,54 @@ const TOOLS = [
         },
       },
       required: ['command'],
+    },
+  },
+  {
+    name: 'plim_progress',
+    description: "Create, update, or finish live dynamic progress messages on the developer's mobile phone via Telegram (in-place message editing). Ideal for multi-step tasks, pipelines, builds, or migrations without polluting the chat with multiple notifications.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'update', 'finish'],
+          description: "Action to perform: 'start' to initialize progress, 'update' to update status/percent/step, 'finish' to conclude.",
+        },
+        progress_id: {
+          type: 'string',
+          description: "Progress session ID returned from 'start'. Required for 'update' and 'finish'.",
+        },
+        title: {
+          type: 'string',
+          description: "Title of the task or pipeline (required for 'start').",
+        },
+        percent: {
+          type: 'number',
+          description: "Progress percentage (0-100).",
+        },
+        status_text: {
+          type: 'string',
+          description: "Current step or status description.",
+        },
+        status: {
+          type: 'string',
+          enum: ['success', 'error'],
+          description: "Final status for 'finish' action.",
+        },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              status: { type: 'string', enum: ['done', 'active', 'pending', 'failed'] },
+            },
+            required: ['label', 'status'],
+          },
+          description: "List of steps and their respective statuses.",
+        },
+      },
+      required: ['action'],
     },
   },
 ];
@@ -448,6 +496,132 @@ function handleRequest(req) {
       }
 
       executeAndHandle(1);
+      return;
+    }
+
+    if (name === 'plim_progress') {
+      const { apiKey, apiUrl, lang } = loadPlimConfig();
+      if (!apiKey) {
+        return sendResponse(id, {
+          content: [{ type: 'text', text: 'Error: Plim is not connected. Run `plim connect <token>` first.' }],
+          isError: true,
+        });
+      }
+
+      const action = args.action;
+      if (!action || !['start', 'update', 'finish'].includes(action)) {
+        return sendResponse(id, {
+          content: [{ type: 'text', text: "Error: 'action' parameter must be 'start', 'update', or 'finish'." }],
+          isError: true,
+        });
+      }
+
+      (async () => {
+        try {
+          if (action === 'start') {
+            const title = args.title || (lang === 'pt' ? 'Execução em Progresso' : 'Execution in Progress');
+            const res = await fetch(`${apiUrl}/api/progress/start`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                title,
+                steps: args.steps,
+                percent: args.percent || 0,
+                text: args.status_text,
+              }),
+            });
+            const data = await res.json();
+            if (data.ok && data.id) {
+              return sendResponse(id, {
+                content: [{ type: 'text', text: `Live progress message started on Telegram.\nProgress ID: ${data.id}` }],
+              });
+            }
+            return sendResponse(id, {
+              content: [{ type: 'text', text: `Failed to start progress: ${data.error || 'Unknown error'}` }],
+              isError: true,
+            });
+          }
+
+          if (action === 'update') {
+            const progressId = args.progress_id;
+            if (!progressId) {
+              return sendResponse(id, {
+                content: [{ type: 'text', text: "Error: 'progress_id' is required for 'update' action." }],
+                isError: true,
+              });
+            }
+
+            const res = await fetch(`${apiUrl}/api/progress/update`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                id: progressId,
+                percent: args.percent,
+                text: args.status_text,
+                steps: args.steps,
+              }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+              return sendResponse(id, {
+                content: [{ type: 'text', text: `Progress updated on Telegram (ID: ${progressId}, ${data.percent}%).` }],
+              });
+            }
+            return sendResponse(id, {
+              content: [{ type: 'text', text: `Failed to update progress: ${data.error || 'Unknown error'}` }],
+              isError: true,
+            });
+          }
+
+          if (action === 'finish') {
+            const progressId = args.progress_id;
+            if (!progressId) {
+              return sendResponse(id, {
+                content: [{ type: 'text', text: "Error: 'progress_id' is required for 'finish' action." }],
+                isError: true,
+              });
+            }
+
+            const status = args.status || 'success';
+            playDesktopSound(status === 'error' ? 'Sosumi' : 'Glass');
+
+            const res = await fetch(`${apiUrl}/api/progress/finish`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                id: progressId,
+                status,
+                text: args.status_text,
+                steps: args.steps,
+              }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+              return sendResponse(id, {
+                content: [{ type: 'text', text: `Progress concluded with status '${status}' on Telegram (ID: ${progressId}).` }],
+              });
+            }
+            return sendResponse(id, {
+              content: [{ type: 'text', text: `Failed to finish progress: ${data.error || 'Unknown error'}` }],
+              isError: true,
+            });
+          }
+        } catch (err) {
+          return sendResponse(id, {
+            content: [{ type: 'text', text: `Network error communicating with Plim Cloud: ${err.message}` }],
+            isError: true,
+          });
+        }
+      })();
       return;
     }
 

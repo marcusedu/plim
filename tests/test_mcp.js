@@ -100,6 +100,7 @@ async function runTests() {
   assert(toolNames.includes('plim_notify'), 'Ferramenta plim_notify está registrada');
   assert(toolNames.includes('plim_run'), 'Ferramenta plim_run está registrada');
   assert(toolNames.includes('plim_ask'), 'Ferramenta plim_ask está registrada');
+  assert(toolNames.includes('plim_progress'), 'Ferramenta plim_progress está registrada');
 
   // Teste 3: Tool inexistente
   sendRpc({
@@ -132,6 +133,22 @@ async function runTests() {
 
   const runErrRes = responses.find((r) => r.id === 4);
   assert(runErrRes?.result?.isError === true, 'plim_run sem comando retorna isError: true');
+
+  // Teste 4.1: plim_progress com ação inválida
+  sendRpc({
+    jsonrpc: '2.0',
+    id: 5,
+    method: 'tools/call',
+    params: {
+      name: 'plim_progress',
+      arguments: { action: 'invalida' },
+    },
+  });
+
+  await new Promise((r) => setTimeout(r, 200));
+
+  const progErrRes = responses.find((r) => r.id === 5);
+  assert(progErrRes?.result?.isError === true, 'plim_progress com action inválida retorna isError: true');
 
   mcpProcess.kill();
 
