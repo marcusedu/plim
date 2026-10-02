@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Plim - CLI de produtividade multiplataforma (macOS, Linux, Windows Git Bash / WSL)
+# Plim - Productivity CLI for developers (macOS, Linux, Windows Git Bash / WSL)
 
 # ---------------------------------------------------------------------------
 # Configurações (~/.config/plim/config ou ~/.plimrc)
@@ -8,9 +8,21 @@
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/plim"
 CONFIG_FILE="$CONFIG_DIR/config"
 [[ -f "$HOME/.plimrc" ]] && CONFIG_FILE="$HOME/.plimrc"
-[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
 
-PLIM_VERSION="1.3.0"
+_ENV_LANG="${PLIM_LANG:-}"
+[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+[[ -n "$_ENV_LANG" ]] && PLIM_LANG="$_ENV_LANG"
+
+# Resolve display language (pt if pt_* or set to pt, otherwise en)
+if [[ -z "$PLIM_LANG" ]]; then
+    if [[ "${LANG:-}" == pt* || "${LC_ALL:-}" == pt* ]]; then
+        PLIM_LANG="pt"
+    else
+        PLIM_LANG="en"
+    fi
+fi
+
+PLIM_VERSION="1.4.0"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
@@ -244,8 +256,13 @@ send_remote_notification() {
 # ---------------------------------------------------------------------------
 run_command() {
     if [[ $# -eq 0 ]]; then
-        echo "Uso: plim run <comando e argumentos>"
-        echo "Exemplo: plim run npm run build"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "Uso: plim run <comando e argumentos>"
+            echo "Exemplo: plim run npm run build"
+        else
+            echo "Usage: plim run <command and arguments>"
+            echo "Example: plim run npm run build"
+        fi
         return 1
     fi
 
@@ -253,7 +270,11 @@ run_command() {
     local start_time=$(date +%s)
     local temp_out=$(mktemp -t plim_output.XXXXXX 2>/dev/null || mktemp)
 
-    echo "🚀 [plim] Executando: $full_cmd"
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "🚀 [plim] Executando: $full_cmd"
+    else
+        echo "🚀 [plim] Running: $full_cmd"
+    fi
 
     # Executa o comando via eval para suportar flags, pipes e encadeamentos
     eval "$@" 2>&1 | tee "$temp_out"
@@ -268,12 +289,12 @@ run_command() {
     local status_icon status_label status_type sound_key
     if [[ $exit_code -eq 0 ]]; then
         status_icon="✅"
-        status_label="Sucesso"
+        status_label=$([[ "$PLIM_LANG" == "pt" ]] && echo "Sucesso" || echo "Success")
         status_type="success"
         sound_key="success"
     else
         status_icon="❌"
-        status_label="Falha (exit $exit_code)"
+        status_label=$([[ "$PLIM_LANG" == "pt" ]] && echo "Falha (exit $exit_code)" || echo "Failed (exit $exit_code)")
         status_type="error"
         sound_key="error"
     fi
@@ -283,7 +304,8 @@ run_command() {
 
     # 2. Notificação local de desktop
     local nl=$'\n'
-    show_desktop_notification "${status_icon} Plim: ${status_label}" "Duração: ${duration}${nl}${full_cmd}"
+    local dur_prefix=$([[ "$PLIM_LANG" == "pt" ]] && echo "Duração" || echo "Duration")
+    show_desktop_notification "${status_icon} Plim: ${status_label}" "${dur_prefix}: ${duration}${nl}${full_cmd}"
 
     # 3. Notificação Remota (Cloudflare Worker ou Telegram Direto)
     send_remote_notification "${status_icon} ${status_label}: ${full_cmd}" "" "$tail_output" "$duration" "$status_type"
@@ -303,7 +325,11 @@ start_mcp_server() {
     if command -v node >/dev/null 2>&1; then
         exec node "$script_dir/plim-mcp.js" "$@"
     else
-        echo "Erro: Node.js é necessário para executar o servidor MCP do Plim."
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "Erro: Node.js é necessário para executar o servidor MCP do Plim."
+        else
+            echo "Error: Node.js is required to run the Plim MCP server."
+        fi
         return 1
     fi
 }
@@ -316,18 +342,28 @@ ask_cli() {
     shift 2>/dev/null || true
 
     if [[ -z "$question" || "$question" == "-h" || "$question" == "--help" ]]; then
-        echo "Uso: plim ask \"Sua pergunta\" [opcao1] [opcao2] ..."
-        echo "Exemplo: plim ask \"Aplicar migração em produção?\" \"Sim\" \"Não\""
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "Uso: plim ask \"Sua pergunta\" [opcao1] [opcao2] ..."
+            echo "Exemplo: plim ask \"Aplicar migração em produção?\" \"Sim\" \"Não\""
+        else
+            echo "Usage: plim ask \"Your question\" [option1] [option2] ..."
+            echo "Example: plim ask \"Deploy migration to production?\" \"Yes\" \"No\""
+        fi
         return 1
     fi
 
     if [[ -z "$PLIM_API_KEY" ]]; then
-        echo "❌ Erro: Plim não está conectado ao Telegram. Execute 'plim connect <token>' primeiro."
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "❌ Erro: Plim não está conectado ao Telegram. Execute 'plim connect <token>' primeiro."
+        else
+            echo "❌ Error: Plim is not connected to Telegram. Run 'plim connect <token>' first."
+        fi
         return 1
     fi
 
     # Constrói array de opções JSON (limpa vírgulas ou colchetes extras se digitados)
-    local options_json="[\"Sim\", \"Não\"]"
+    local default_opts=$([[ "$PLIM_LANG" == "pt" ]] && echo '["Sim", "Não"]' || echo '["Yes", "No"]')
+    local options_json="$default_opts"
     if [[ $# -gt 0 ]]; then
         local opts=()
         for opt in "$@"; do
@@ -348,7 +384,12 @@ ask_cli() {
     local safe_q=$(escape_json "$question")
     local payload="{\"question\":\"${safe_q}\",\"options\":${options_json},\"type\":\"question\"}"
 
-    echo "📱 Enviando pergunta para o seu Telegram..."
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "📱 Enviando pergunta para o seu Telegram..."
+    else
+        echo "📱 Sending question to your Telegram..."
+    fi
+
     local res
     res=$(curl -s -X POST "${API_URL}/api/ask" \
         -H "Authorization: Bearer ${PLIM_API_KEY}" \
@@ -368,12 +409,20 @@ except Exception:
     fi
 
     if [[ -z "$ask_id" ]]; then
-        echo "❌ Falha ao enviar pergunta: $res"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "❌ Falha ao enviar pergunta: $res"
+        else
+            echo "❌ Failed to send question: $res"
+        fi
         return 1
     fi
 
     play_sound "Ping"
-    echo "⏳ Pergunta enviada! Aguardando sua resposta no celular..."
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "⏳ Pergunta enviada! Aguardando sua resposta no celular..."
+    else
+        echo "⏳ Question sent! Waiting for response on your mobile phone..."
+    fi
 
     local start_ts=$(date +%s)
     local timeout_sec=300
@@ -382,7 +431,11 @@ except Exception:
         local now_ts=$(date +%s)
         if (( now_ts - start_ts > timeout_sec )); then
             echo ""
-            echo "⏱️ Tempo limite de espera esgotado (${timeout_sec}s)."
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "⏱️ Tempo limite de espera esgotado (${timeout_sec}s)."
+            else
+                echo "⏱️ Timeout waiting for response (${timeout_sec}s)."
+            fi
             return 1
         fi
 
@@ -409,7 +462,11 @@ except Exception:
         if [[ "$status_val" == "answered" ]]; then
             echo ""
             play_sound "success"
-            echo "🎉 Resposta recebida pelo Telegram: ${answer_val}"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "🎉 Resposta recebida pelo Telegram: ${answer_val}"
+            else
+                echo "🎉 Response received from Telegram: ${answer_val}"
+            fi
             return "$answer_idx"
         fi
         printf "."
@@ -436,8 +493,13 @@ check_update_daily() {
         local remote_ver
         remote_ver=$(cat "$latest_file" 2>/dev/null | tr -d '[:space:]')
         if [[ -n "$remote_ver" && "$remote_ver" != "$PLIM_VERSION" ]]; then
-            printf "\n💡 \033[1;33mNova versão do Plim disponível:\033[0m %s → \033[1;32m%s\033[0m\n" "$PLIM_VERSION" "$remote_ver"
-            printf "   Execute \033[1;36mplim update\033[0m para atualizar.\n\n"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                printf "\n💡 \033[1;33mNova versão do Plim disponível:\033[0m %s → \033[1;32m%s\033[0m\n" "$PLIM_VERSION" "$remote_ver"
+                printf "   Execute \033[1;36mplim update\033[0m para atualizar.\n\n"
+            else
+                printf "\n💡 \033[1;33mNew Plim version available:\033[0m %s → \033[1;32m%s\033[0m\n" "$PLIM_VERSION" "$remote_ver"
+                printf "   Run \033[1;36mplim update\033[0m to upgrade.\n\n"
+            fi
         fi
     fi
 
@@ -462,22 +524,38 @@ check_update_daily() {
 }
 
 update_plim() {
-    echo "🔍 Verificando atualizações no GitHub (${GITHUB_REPO})..."
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "🔍 Verificando atualizações no GitHub (${GITHUB_REPO})..."
+    else
+        echo "🔍 Checking for updates on GitHub (${GITHUB_REPO})..."
+    fi
     local remote_ver
     remote_ver=$(curl -fsSL --connect-timeout 5 "${RAW_BASE_URL}/VERSION" 2>/dev/null | tr -d '[:space:]')
 
     if [[ -z "$remote_ver" ]]; then
-        echo "❌ Não foi possível verificar a versão remota. Verifique sua conexão com a internet."
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "❌ Não foi possível verificar a versão remota. Verifique sua conexão com a internet."
+        else
+            echo "❌ Could not check remote version. Check your internet connection."
+        fi
         return 1
     fi
 
     if [[ "$remote_ver" == "$PLIM_VERSION" ]]; then
-        echo "✅ O Plim já está na versão mais recente (v${PLIM_VERSION})!"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "✅ O Plim já está na versão mais recente (v${PLIM_VERSION})!"
+        else
+            echo "✅ Plim is already on the latest version (v${PLIM_VERSION})!"
+        fi
         rm -f "$CONFIG_DIR/.latest_version" 2>/dev/null || true
         return 0
     fi
 
-    echo "🚀 Atualizando Plim: v${PLIM_VERSION} → v${remote_ver}..."
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "🚀 Atualizando Plim: v${PLIM_VERSION} → v${remote_ver}..."
+    else
+        echo "🚀 Updating Plim: v${PLIM_VERSION} → v${remote_ver}..."
+    fi
 
     # Resolve o caminho real do executável
     local target="${BASH_SOURCE[0]:-$0}"
@@ -502,11 +580,19 @@ update_plim() {
         # Limpa o arquivo de versão pendente
         rm -f "$CONFIG_DIR/.latest_version" 2>/dev/null || true
 
-        echo "🎉 Plim atualizado com sucesso para a versão v${remote_ver}!"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "🎉 Plim atualizado com sucesso para a versão v${remote_ver}!"
+        else
+            echo "🎉 Plim updated successfully to version v${remote_ver}!"
+        fi
         return 0
     else
         rm -f "$temp_bin"
-        echo "❌ Falha ao baixar os arquivos da nova versão."
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "❌ Falha ao baixar os arquivos da nova versão."
+        else
+            echo "❌ Failed to download new version files."
+        fi
         return 1
     fi
 }
@@ -536,16 +622,65 @@ handle_notify_or_pipe() {
     # Interpreta \n se passado na mensagem
     [[ -n "$message" ]] && message=$(printf "%b" "$message")
 
-    local local_msg="${message:-Processamento concluído}"
-    local notif_title="🔔 Plim: ${message:-Notificação}"
+    local def_msg=$([[ "$PLIM_LANG" == "pt" ]] && echo "Processamento concluído" || echo "Processing completed")
+    local notif_prefix=$([[ "$PLIM_LANG" == "pt" ]] && echo "Notificação" || echo "Notification")
+    local pipe_prefix=$([[ "$PLIM_LANG" == "pt" ]] && echo "Pipe concluído" || echo "Pipe completed")
+
+    local local_msg="${message:-$def_msg}"
+    local notif_title="🔔 Plim: ${message:-$notif_prefix}"
 
     if [[ -z "$message" && -n "$input_data" ]]; then
         local_msg=$(echo "$input_data" | tail -n 2)
-        notif_title="🔔 Plim: Pipe concluído"
+        notif_title="🔔 Plim: $pipe_prefix"
     fi
 
     show_desktop_notification "Plim" "$local_msg"
     send_remote_notification "$notif_title" "" "$input_data" "" "info"
+}
+
+manage_lang() {
+    local new_lang="$1"
+    if [[ -z "$new_lang" ]]; then
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "Idioma atual: Português (pt)"
+            echo "Para alterar: plim lang en"
+        else
+            echo "Current language: English (en)"
+            echo "To change: plim lang pt"
+        fi
+        return 0
+    fi
+
+    case "$new_lang" in
+        pt|pt-BR|pt_BR|portugues|portuguese)
+            new_lang="pt"
+            ;;
+        en|en-US|en_US|english|ingles)
+            new_lang="en"
+            ;;
+        *)
+            echo "Invalid language: $new_lang (supported: en, pt)"
+            return 1
+            ;;
+    esac
+
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    touch "$CONFIG_FILE" 2>/dev/null || true
+    if grep -q '^PLIM_LANG=' "$CONFIG_FILE" 2>/dev/null; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/^PLIM_LANG=.*/PLIM_LANG=\"$new_lang\"/" "$CONFIG_FILE"
+        else
+            sed -i "s/^PLIM_LANG=.*/PLIM_LANG=\"$new_lang\"/" "$CONFIG_FILE"
+        fi
+    else
+        echo "PLIM_LANG=\"$new_lang\"" >> "$CONFIG_FILE"
+    fi
+
+    if [[ "$new_lang" == "pt" ]]; then
+        echo "✅ Idioma configurado para Português (pt)."
+    else
+        echo "✅ Language configured to English (en)."
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -576,36 +711,68 @@ case "$1" in
         start_mcp_server "$@"
         ;;
 
+    lang|--lang)
+        shift
+        manage_lang "$@"
+        ;;
+
     connect)
         shift
         token="$1"
         if [[ -z "$token" ]]; then
-            echo "Uso: plim connect <SEU_TOKEN>"
-            echo "Exemplo: plim connect plim_live_abc123..."
-            echo ""
-            echo "Para obter um token, abra o bot no Telegram e envie /start:"
-            echo "👉 https://t.me/plim_the_bot"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "Uso: plim connect <SEU_TOKEN>"
+                echo "Exemplo: plim connect plim_live_abc123..."
+                echo ""
+                echo "Para obter um token, abra o bot no Telegram e envie /start:"
+                echo "👉 https://t.me/plim_the_bot"
+            else
+                echo "Usage: plim connect <YOUR_TOKEN>"
+                echo "Example: plim connect plim_live_abc123..."
+                echo ""
+                echo "To get a token, open the bot on Telegram and send /start:"
+                echo "👉 https://t.me/plim_the_bot"
+            fi
             return 1 2>/dev/null || exit 1
         fi
 
+        current_lang="${PLIM_LANG:-}"
         mkdir -p "$CONFIG_DIR" 2>/dev/null || true
         cat << EOF > "$CONFIG_FILE"
 PLIM_API_KEY="$token"
 PLIM_API_URL="${API_URL}"
 EOF
+        if [[ -n "$current_lang" ]]; then
+            echo "PLIM_LANG=\"$current_lang\"" >> "$CONFIG_FILE"
+        fi
         chmod 600 "$CONFIG_FILE" 2>/dev/null || true
-        echo "✅ Configuração salva em $CONFIG_FILE"
-        echo "📡 Conectando ao Plim Cloud..."
+
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "✅ Configuração salva em $CONFIG_FILE"
+            echo "📡 Conectando ao Plim Cloud..."
+        else
+            echo "✅ Configuration saved to $CONFIG_FILE"
+            echo "📡 Connecting to Plim Cloud..."
+        fi
 
         res=$(curl -s -X POST "${API_URL}/api/connect" \
             -H "Content-Type: application/json" \
             -d "{\"token\": \"$token\"}")
 
         if echo "$res" | grep -q '"ok":true'; then
-            echo "🎉 Conectado com sucesso! Verifique a notificação de boas-vindas no seu Telegram."
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "🎉 Conectado com sucesso! Verifique a notificação de boas-vindas no seu Telegram."
+            else
+                echo "🎉 Connected successfully! Check the welcome notification on your Telegram."
+            fi
         else
-            echo "⚠️  Salvo localmente, mas a verificação remota retornou: $res"
-            echo "Você pode testar o envio com: plim test"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "⚠️  Salvo localmente, mas a verificação remota retornou: $res"
+                echo "Você pode testar o envio com: plim test"
+            else
+                echo "⚠️  Saved locally, but remote verification returned: $res"
+                echo "You can test delivery with: plim test"
+            fi
         fi
         ;;
 
@@ -622,31 +789,63 @@ EOF
         if [[ "$OSTYPE" == "darwin"* && -d "$SOUNDS_DIR" ]]; then
             ls "$SOUNDS_DIR" | sed 's/\.aiff$//'
         else
-            echo "Sons de sistema disponíveis:"
-            echo "  success (som de conclusão)"
-            echo "  error   (som de alerta)"
-            echo "  random  (som aleatório)"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "Sons de sistema disponíveis:"
+                echo "  success (som de conclusão)"
+                echo "  error   (som de alerta)"
+                echo "  random  (som aleatório)"
+            else
+                echo "Available system sounds:"
+                echo "  success (completion sound)"
+                echo "  error   (alert sound)"
+                echo "  random  (random sound)"
+            fi
         fi
         ;;
 
     test|--test)
-        echo "🔊 Testando som local..."
-        play_sound "success"
-        show_desktop_notification "Plim" "Teste local do Plim funcionando!"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "🔊 Testando som local..."
+            play_sound "success"
+            show_desktop_notification "Plim" "Teste local do Plim funcionando!"
+        else
+            echo "🔊 Testing local sound..."
+            play_sound "success"
+            show_desktop_notification "Plim" "Plim local test working!"
+        fi
 
         if [[ -n "$PLIM_API_KEY" ]]; then
-            echo "📱 Enviando notificação de teste via Plim Cloud (Worker)..."
-            SYNC_NOTIFY=true send_remote_notification "🔔 Teste do Plim" "A integração com o Plim Cloud está 100% funcionando! 🎉" "" "" "info"
-            echo "✅ Requisição enviada para a API."
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "📱 Enviando notificação de teste via Plim Cloud (Worker)..."
+                SYNC_NOTIFY=true send_remote_notification "🔔 Teste do Plim" "A integração com o Plim Cloud está 100% funcionando! 🎉" "" "" "info"
+                echo "✅ Requisição enviada para a API."
+            else
+                echo "📱 Sending test notification via Plim Cloud (Worker)..."
+                SYNC_NOTIFY=true send_remote_notification "🔔 Plim Test" "Plim Cloud integration is working 100%! 🎉" "" "" "info"
+                echo "✅ Request sent to API."
+            fi
         elif [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
-            echo "📱 Enviando notificação de teste direto para o Telegram..."
-            SYNC_NOTIFY=true send_telegram_direct "🔔 Teste do Plim" "A integração com seu bot do Telegram está funcionando! 🎉" ""
-            echo "✅ Mensagem enviada para o Telegram (Chat ID: $TELEGRAM_CHAT_ID)."
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "📱 Enviando notificação de teste direto para o Telegram..."
+                SYNC_NOTIFY=true send_telegram_direct "🔔 Teste do Plim" "A integração com seu bot do Telegram está funcionando! 🎉" ""
+                echo "✅ Mensagem enviada para o Telegram (Chat ID: $TELEGRAM_CHAT_ID)."
+            else
+                echo "📱 Sending test notification directly to Telegram..."
+                SYNC_NOTIFY=true send_telegram_direct "🔔 Plim Test" "Integration with your Telegram bot is working! 🎉" ""
+                echo "✅ Message sent to Telegram (Chat ID: $TELEGRAM_CHAT_ID)."
+            fi
         else
-            echo "⚠️  Nenhum serviço remoto configurado."
-            echo "Para conectar com 1 clique:"
-            echo "  1. Abra https://t.me/plim_the_bot e envie /start"
-            echo "  2. Rode: plim connect <SEU_TOKEN>"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "⚠️  Nenhum serviço remoto configurado."
+                echo "Para conectar com 1 clique:"
+                echo "  1. Abra https://t.me/plim_the_bot e envie /start"
+                echo "  2. Rode: plim connect <SEU_TOKEN>"
+            else
+                echo "⚠️  No remote service configured."
+                echo "To connect in 1 click:"
+                echo "  1. Open https://t.me/plim_the_bot and send /start"
+                echo "  2. Run: plim connect <YOUR_TOKEN>"
+            fi
         fi
         ;;
 
@@ -656,7 +855,11 @@ EOF
             token="$2"
             chat_id="$3"
             if [[ -z "$token" || -z "$chat_id" ]]; then
-                echo "Uso: plim config set <BOT_TOKEN> <CHAT_ID>"
+                if [[ "$PLIM_LANG" == "pt" ]]; then
+                    echo "Uso: plim config set <BOT_TOKEN> <CHAT_ID>"
+                else
+                    echo "Usage: plim config set <BOT_TOKEN> <CHAT_ID>"
+                fi
                 return 1 2>/dev/null || exit 1
             fi
             mkdir -p "$CONFIG_DIR" 2>/dev/null || true
@@ -665,33 +868,60 @@ TELEGRAM_BOT_TOKEN="$token"
 TELEGRAM_CHAT_ID="$chat_id"
 EOF
             chmod 600 "$CONFIG_FILE" 2>/dev/null || true
-            echo "✅ Configuração salva com sucesso em: $CONFIG_FILE"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "✅ Configuração salva com sucesso em: $CONFIG_FILE"
+            else
+                echo "✅ Configuration successfully saved to: $CONFIG_FILE"
+            fi
             return 0 2>/dev/null || exit 0
         fi
 
         if [[ "$1" == "set-url" ]]; then
             url="$2"
             if [[ -z "$url" ]]; then
-                echo "Uso: plim config set-url <URL_DA_API>"
+                if [[ "$PLIM_LANG" == "pt" ]]; then
+                    echo "Uso: plim config set-url <URL_DA_API>"
+                else
+                    echo "Usage: plim config set-url <API_URL>"
+                fi
                 return 1 2>/dev/null || exit 1
             fi
             mkdir -p "$CONFIG_DIR" 2>/dev/null || true
             echo "PLIM_API_URL=\"$url\"" >> "$CONFIG_FILE"
-            echo "✅ URL da API configurada para: $url"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "✅ URL da API configurada para: $url"
+            else
+                echo "✅ API URL configured to: $url"
+            fi
             return 0 2>/dev/null || exit 0
         fi
 
-        echo "Configuração do Plim:"
-        echo "Arquivo: $CONFIG_FILE"
-        echo ""
-        if [[ -f "$CONFIG_FILE" ]]; then
-            cat "$CONFIG_FILE"
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "Configuração do Plim:"
+            echo "Arquivo: $CONFIG_FILE"
+            echo ""
+            if [[ -f "$CONFIG_FILE" ]]; then
+                cat "$CONFIG_FILE"
+            else
+                echo "Nenhum arquivo de configuração ativo."
+                echo "Para conectar ao Cloudflare Worker:"
+                echo "  plim connect <SEU_TOKEN>"
+                echo "Ou para usar bot próprio:"
+                echo '  plim config set "<BOT_TOKEN>" "<CHAT_ID>"'
+            fi
         else
-            echo "Nenhum arquivo de configuração ativo."
-            echo "Para conectar ao Cloudflare Worker:"
-            echo "  plim connect <SEU_TOKEN>"
-            echo "Ou para usar bot próprio:"
-            echo '  plim config set "<BOT_TOKEN>" "<CHAT_ID>"'
+            echo "Plim Configuration:"
+            echo "File: $CONFIG_FILE"
+            echo ""
+            if [[ -f "$CONFIG_FILE" ]]; then
+                cat "$CONFIG_FILE"
+            else
+                echo "No active configuration file."
+                echo "To connect to Cloudflare Worker:"
+                echo "  plim connect <YOUR_TOKEN>"
+                echo "Or to use a custom bot:"
+                echo '  plim config set "<BOT_TOKEN>" "<CHAT_ID>"'
+            fi
         fi
         ;;
 
@@ -708,21 +938,41 @@ EOF
         if [[ ! -t 0 ]] || [[ "$1" != -* ]]; then
             handle_notify_or_pipe "$@"
         else
-            echo "Uso:"
-            echo "  plim                           # Toca som aleatório ou sinal sonoro"
-            echo "  plim [mensagem]                # Notificação rápida (ex: plim 'Deploy pronto')"
-            echo "  plim ask <pergunta> [opções]   # Pergunta interativa com botões no Telegram e aguarda resposta"
-            echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
-            echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
-            echo "  comando | plim                 # Lê a saída em tempo real e avisa no término"
-            echo "  comando | plim 'Mensagem'      # Lê a saída e notifica com mensagem customizada"
-            echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
-            echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
-            echo "  plim update                    # Atualiza o Plim para a versão mais recente"
-            echo "  plim version                   # Exibe a versão atual do Plim (-v)"
-            echo "  plim config                    # Exibe configuração atual"
-            echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
-            echo "  plim -l                        # Lista sons disponíveis"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "Uso:"
+                echo "  plim                           # Toca som aleatório ou sinal sonoro"
+                echo "  plim [mensagem]                # Notificação rápida (ex: plim 'Deploy pronto')"
+                echo "  plim ask <pergunta> [opções]   # Pergunta interativa com botões no Telegram e aguarda resposta"
+                echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
+                echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
+                echo "  comando | plim                 # Lê a saída em tempo real e avisa no término"
+                echo "  comando | plim 'Mensagem'      # Lê a saída e notifica com mensagem customizada"
+                echo "  plim connect <token>           # Conecta sua conta usando token do @plim_the_bot"
+                echo "  plim mcp                       # Inicia servidor MCP para agentes de IA (Claude, Cursor, etc.)"
+                echo "  plim lang [en|pt]              # Exibe ou define idioma da CLI"
+                echo "  plim update                    # Atualiza o Plim para a versão mais recente"
+                echo "  plim version                   # Exibe a versão atual do Plim (-v)"
+                echo "  plim config                    # Exibe configuração atual"
+                echo "  plim -p <som>                  # Toca um som específico (success, error, Ping, etc.)"
+                echo "  plim -l                        # Lista sons disponíveis"
+            else
+                echo "Usage:"
+                echo "  plim                           # Play random sound or terminal bell"
+                echo "  plim [message]                 # Quick notification (e.g. plim 'Build finished')"
+                echo "  plim ask <question> [options]  # Interactive question with Telegram buttons, wait for answer"
+                echo "  plim run <command and args>    # Run command, measure time, detect success/error, notify"
+                echo "  plim -n 'Message'              # Desktop and Telegram push notification"
+                echo "  command | plim                 # Stream output and alert when finished"
+                echo "  command | plim 'Message'       # Stream output and notify with custom message"
+                echo "  plim connect <token>           # Connect account with token from @plim_the_bot"
+                echo "  plim mcp                       # Start MCP server for AI coding agents (Claude, Cursor, etc.)"
+                echo "  plim lang [en|pt]              # Display or set CLI display language"
+                echo "  plim update                    # Upgrade Plim to the latest version"
+                echo "  plim version                   # Display current Plim version (-v)"
+                echo "  plim config                    # View current configuration"
+                echo "  plim -p <sound>                # Play specific sound (success, error, Ping, etc.)"
+                echo "  plim -l                        # List available sounds"
+            fi
         fi
         ;;
 esac

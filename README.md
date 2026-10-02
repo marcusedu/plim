@@ -1,108 +1,135 @@
 <div align="center">
   <img src="assets/icon.jpg" width="128" height="128" alt="Plim Logo" style="border-radius: 28px;" />
   <h1>Plim</h1>
-  <p><b>CLI de produtividade para desenvolvedores</b></p>
-  <p>Monitore builds, testes e deploys demorados com efeitos sonoros nativos e notificações instantâneas no seu celular via Telegram.</p>
+  <p><b>Productivity CLI for developers & MCP Server for AI coding agents</b></p>
+  <p>Monitor long-running builds, tests, and deploys with native desktop audio alerts and instant push notifications on your phone via Telegram.</p>
+  <p>
+    🌐 <b>English</b> | <b><a href="README.pt-BR.md">Português</a></b>
+  </p>
 </div>
 
-Acompanha backend serverless em **Cloudflare Worker** integrado ao bot **[@plim_the_bot](https://t.me/plim_the_bot)** com suporte a controle de acesso e limites diários de uso.
+Includes an official **Model Context Protocol (MCP)** server for AI coding agents and a serverless backend on **Cloudflare Workers** integrated with **[@plim_the_bot](https://t.me/plim_the_bot)** featuring interactive Telegram questions, rate limits, and zero-setup onboarding.
 
 ---
 
-## ✨ Funcionalidades
+## ✨ Features
 
-- **Monitor de Comandos (`plim run`)**: Executa qualquer comando ou script, cronometra a duração, detecta sucesso ou falha, emite som característico (`Ping` ou `Basso`), exibe notificação local e despacha relatório para o Telegram com as últimas linhas do output.
-- **Onboarding Instantâneo com Telegram**: Abra o bot [@plim_the_bot](https://t.me/plim_the_bot), envie `/start` e conecte seu terminal com `plim connect <token>`.
-- **Suporte a Pipes (`| plim -n`)**: Envie logs ou confirmações encadeadas diretamente no terminal.
-- **Sons Nativos do macOS**: Integração direta com `/System/Library/Sounds` (`afplay`).
-- **Backend em Cloudflare Worker**:
-  - Webhook oficial do Telegram com geração automática de tokens.
-  - Armazenamento em Cloudflare KV (`token -> chat_id`, limites de uso diário).
-  - Suporte a planos Free (50 notificações/dia) e Pro/Ilimitado (preparado para Telegram Stars).
-- **100% Multiplataforma**:
-  - 🍏 **macOS**: `afplay` e AppleScript nativos.
-  - 🐧 **Linux**: `notify-send` e sons do freedesktop (`paplay`/`aplay`/bell).
-  - 🪟 **Windows**: Suporte total via WSL, Git Bash e script nativo `plim.ps1` para PowerShell.
-- **Modo Self-Hosted**: Quem preferir usar um bot próprio sem passar pelo Cloudflare pode configurar diretamente via `plim config set`.
+- **Command Monitor (`plim run`)**: Executes any shell command or script, tracks duration, detects success or failure, plays distinctive system audio (`Ping` or `Basso`), triggers desktop notifications, and sends output logs to your phone via Telegram.
+- **Interactive Mobile Decisions (`plim ask`)**: Prompts you with interactive multiple-choice buttons on your phone via Telegram to approve migrations, deploys, or code changes while away from your desk.
+- **MCP Server for AI Agents (`plim mcp` or `npx -y plim-mcp`)**: Native tools (`plim_notify`, `plim_ask`, `plim_run`) for Claude Desktop, Cursor, Windsurf, Cline, and Antigravity.
+- **Internationalization (i18n)**: Full bilingual support for **English** and **Portuguese**, auto-detected from system locale or configurable via `plim lang [en|pt]`.
+- **Instant Telegram Onboarding**: Open [@plim_the_bot](https://t.me/plim_the_bot), send `/start`, and link your terminal with `plim connect <token>`.
+- **Unix Pipe Streaming (`| plim -n`)**: Pipe long outputs or confirmations directly into Plim.
+- **Native Audio on macOS, Linux, and Windows**: Uses `/System/Library/Sounds` (`afplay`), Freedesktop sound themes, or Windows System Sounds.
+- **Cloudflare Worker Backend**:
+  - Official Telegram webhook with automatic token issuance.
+  - State and quotas stored in Cloudflare KV (`token -> chat_id`, daily usage tracking).
+  - Free tier (50 notifications/day) and Pro/Unlimited tier (Telegram Stars).
+- **100% Multiplatform**:
+  - 🍏 **macOS**: Native `afplay` and AppleScript notifications.
+  - 🐧 **Linux**: `notify-send` and desktop audio (`paplay`/`aplay`/bell).
+  - 🪟 **Windows**: WSL, Git Bash, and native PowerShell script (`plim.ps1`).
+- **Self-Hosted Mode**: Use your own Telegram Bot token and chat ID directly via `plim config set`.
 
 ---
 
-## 🚀 Instalação Rápida
+## 🚀 Quick Install
 
 ### macOS / Linux / Windows (WSL & Git Bash)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash
 ```
 
-### Windows (PowerShell Nativo)
-Clone o repositório ou adicione a pasta `bin` ao seu `$PATH`, ou use:
+### Windows (Native PowerShell)
+Clone the repository or add `bin` to your `$PATH`:
 ```powershell
-.\bin\plim.ps1 connect <SEU_TOKEN>
+.\bin\plim.ps1 connect <YOUR_TOKEN>
 .\bin\plim.ps1 run npm run build
 ```
 
-*(Ou clone o repositório e rode `make link` para desenvolvimento).*
+*(Or clone the repository and run `make link` for local development).*
 
-### 2. Conectar com o Telegram
-1. Abra o bot no Telegram: **[@plim_the_bot](https://t.me/plim_the_bot)** e envie `/start`.
-2. O bot responderá com o seu comando personalizado de conexão:
+### Connect with Telegram
+1. Open the bot on Telegram: **[@plim_the_bot](https://t.me/plim_the_bot)** and tap `/start`.
+2. The bot will send your personalized connection command:
    ```bash
    plim connect plim_live_...
    ```
-3. Cole o comando no seu terminal. Pronto! Uma mensagem de boas-vindas chegará no seu celular confirmando a ativação.
+3. Paste the command into your terminal. Done! A welcome confirmation will arrive on your phone.
 
 ---
 
-## 📖 Como Usar
+## 📖 Usage Guide
 
-### 1. Monitorar comandos pesados ou demorados
-Executa o comando exibindo a saída normal, mede o tempo decorrido, toca som de sucesso ou erro e avisa no Mac e no Telegram:
+### 1. Monitor long-running commands
+Executes the command with real-time output, measures elapsed time, plays audio cues, and notifies both desktop and Telegram:
 
 ```bash
 plim run npm run build
 plim run docker compose up -d
 plim run git push origin main
-plim run firebase deploy
+plim run cargo test
 ```
 
-### 2. Notificação avulsa ou via pipe
+### 2. Interactive Questions with Telegram Buttons
+Sends a question to your mobile phone with interactive buttons and blocks until you respond:
 
 ```bash
-# Notificação simples
-plim -n "Deploy em homologação concluído!"
+# Default options ("Yes" / "No")
+plim ask "Deploy database migration to production?"
 
-# Via pipe (repassa a saída e notifica ao término)
-cat deploy.log | plim -n "Deploy finalizado"
+# Custom options
+plim ask "Select deployment strategy:" "Canary" "Blue/Green" "Abort"
 ```
 
-### 3. Testar a conexão
+### 3. One-off notifications or pipe streaming
+
+```bash
+# Standalone notification
+plim -n "Staging deployment completed!"
+
+# Via pipe (streams output and alerts on completion)
+cat deploy.log | plim -n "Deploy finished"
+```
+
+### 4. Language Selection (i18n)
+```bash
+# View active language
+plim lang
+
+# Switch language to English or Portuguese
+plim lang en
+plim lang pt
+```
+
+### 5. Test your connection
 ```bash
 plim test
 ```
 
-### 4. Efeitos sonoros locais
+### 6. Local audio effects
 
 ```bash
-# Toca um som aleatório
+# Play random sound
 plim
 
-# Toca um som específico
+# Play specific sound
 plim -p Ping
 plim -p Hero
 plim -p Glass
 
-# Lista todos os sons disponíveis no macOS
+# List available sounds
 plim -l
 ```
 
 ---
 
-## 🤖 Integração com Agentes de IA & MCP
+## 🤖 AI Agent & MCP Integration
 
-O Plim possui suporte nativo ao **Model Context Protocol (MCP)** e ao padrão **`llms.txt`**. Isso permite que agentes de IA autônomos (**Claude Code**, **Cursor**, **Windsurf**, **Cline**, **Aider**) notifiquem o seu celular quando terminarem tarefas pesadas ou precisarem de revisão humana.
+Plim provides native **Model Context Protocol (MCP)** support and conforms to **`llms.txt`**. Autonomous AI agents (**Claude Code**, **Cursor**, **Windsurf**, **Cline**, **Antigravity**) can alert your phone when heavy workflows finish or ask for human review.
 
-### 1. Como Servidor MCP (Claude Desktop, Cursor, Windsurf, Cline)
-Basta adicionar a configuração MCP (disponível em `mcp.json`):
+### 1. MCP Server Configuration (Claude Desktop, Cursor, Windsurf, Cline)
+Add the configuration to your MCP config file (e.g. `claude_desktop_config.json`):
 
 ```json
 {
@@ -115,7 +142,7 @@ Basta adicionar a configuração MCP (disponível em `mcp.json`):
 }
 ```
 
-*Ou diretamente via `npx` (sem precisar instalar a CLI antes):*
+*Or run directly via `npx` (no prior CLI installation needed):*
 ```json
 {
   "mcpServers": {
@@ -127,63 +154,63 @@ Basta adicionar a configuração MCP (disponível em `mcp.json`):
 }
 ```
 
-O agente ganhará automaticamente as ferramentas:
-- **`plim_ask`**: Faz perguntas com botões de múltipla escolha no Telegram e aguarda a decisão do desenvolvedor.
-- **`plim_run`**: Executa comando pesado, notifica na conclusão e oferece botão interativo de Retry no Telegram se houver falha.
-- **`plim_notify`**: Envia alerta com status para o celular do dev.
+The agent automatically receives three tools:
+- **`plim_ask`**: Prompts the developer with interactive buttons on Telegram and waits for their choice.
+- **`plim_run`**: Executes commands, monitors exit codes, sends duration and logs to Telegram, and provides an interactive [Retry] button if failed.
+- **`plim_notify`**: Sends desktop alerts and instant Telegram push notifications with status levels.
 
-### 2. Para Claude Code / Cursor Agent (via `CLAUDE.md`)
-Adicione o arquivo `CLAUDE.md` na raiz do seu projeto. O agente usará o Plim automaticamente para monitorar tarefas demoradas, fazer perguntas pelo Telegram e avisar no seu bolso quando terminar!
+### 2. Claude Code & Cursor Rules (via `CLAUDE.md`)
+Add `CLAUDE.md` to your project root. The AI agent will automatically monitor commands, ask interactive questions, and notify your pocket when finished!
 
 ---
 
-## ☁️ Estrutura do Projeto
+## ☁️ Project Structure
 
 ```text
 plim/
 ├── bin/
-│   ├── plim              # Script CLI executável (macOS, Linux, WSL)
-│   ├── plim-mcp.js       # Servidor MCP stdio para agentes de IA
-│   └── plim.ps1          # Script nativo PowerShell para Windows
-├── worker/               # Backend Cloudflare Worker (TypeScript + Hono)
+│   ├── plim              # Executable CLI script (macOS, Linux, WSL)
+│   ├── plim-mcp.js       # Stdio MCP Server for AI coding agents
+│   └── plim.ps1          # Native PowerShell script for Windows
+├── worker/               # Cloudflare Worker backend (TypeScript + Hono)
 │   ├── src/
-│   │   └── index.ts      # Webhook do Telegram + Perguntas Interativas + API de Notificações
-│   ├── wrangler.toml     # Configuração e KV Bindings
+│   │   └── index.ts      # Telegram Webhook + Interactive Questions + i18n
+│   ├── wrangler.toml     # KV bindings and environment variables
 │   ├── package.json
-│   └── README.md         # Instruções de deploy do Worker
-├── install.sh            # Script de instalação curl-to-bash
-├── Makefile              # Comandos make install / make link
-└── README.md
+│   └── README.md         # Worker deployment guide
+├── install.sh            # One-line curl installer
+├── Makefile              # make install / link / test commands
+├── README.md             # English documentation
+└── README.pt-BR.md       # Portuguese documentation
 ```
 
-Para publicar o backend no seu Cloudflare, veja as instruções em [worker/README.md](worker/README.md).
-
 ---
 
-## 🛠️ Tabela de Comandos
+## 🛠️ CLI Commands Reference
 
-| Comando | Descrição |
+| Command | Description |
 | --- | --- |
-| `plim ask <pergunta> [opções]` | Envia pergunta interativa com botões no Telegram e aguarda resposta |
-| `plim run <comando>` | Executa comando, mede tempo, detecta status e notifica com log |
-| `plim connect <token>` | Conecta ao bot [@plim_the_bot](https://t.me/plim_the_bot) |
-| `plim mcp` | Inicia servidor MCP para agentes de IA (Claude, Cursor, Windsurf) |
-| `plim [mensagem]` | Notificação rápida (ex: `plim 'Deploy pronto'`) |
-| `plim -n [mensagem]` | Dispara notificação no Mac e Telegram |
-| `comando \| plim` | Faz streaming em tempo real, toca som e notifica no término |
-| `comando \| plim 'Deploy'` | Lê o pipe e notifica com mensagem customizada |
-| `plim update` | Verifica e atualiza o Plim para a versão mais recente |
-| `plim version` / `-v` | Exibe a versão instalada do Plim |
-| `plim test` | Testa os canais de áudio, notificação local e Telegram |
-| `plim config` | Exibe a configuração atual ativa |
-| `plim config set-url <url>` | Altera a URL da API do Worker |
-| `plim config set <token> <id>` | Configura bot próprio direto (self-hosted) |
-| `plim` / `plim -r` | Toca um som aleatório do macOS |
-| `plim -p <som>` | Toca um som específico do sistema |
-| `plim -l` | Lista os nomes dos sons disponíveis |
+| `plim ask <question> [options]` | Send interactive Telegram question with buttons and wait for answer |
+| `plim run <command>` | Run command, track time, detect status, and send logs |
+| `plim connect <token>` | Link terminal to [@plim_the_bot](https://t.me/plim_the_bot) |
+| `plim lang [en\|pt]` | Display or set CLI display language |
+| `plim mcp` | Launch MCP server for AI coding agents |
+| `plim [message]` | Quick notification (e.g. `plim 'Build complete'`) |
+| `plim -n [message]` | Trigger desktop sound and Telegram push notification |
+| `command \| plim` | Stream pipe output and alert upon completion |
+| `command \| plim 'Deploy'` | Stream pipe output and notify with custom title |
+| `plim update` | Upgrade Plim to the latest version from GitHub |
+| `plim version` / `-v` | Display currently installed Plim version |
+| `plim test` | Test audio cues, desktop banner, and Telegram delivery |
+| `plim config` | Display active configuration |
+| `plim config set-url <url>` | Override Worker API URL |
+| `plim config set <token> <id>` | Configure direct custom Telegram bot (self-hosted) |
+| `plim` / `plim -r` | Play random system sound |
+| `plim -p <sound>` | Play specific system sound |
+| `plim -l` | List available sounds |
 
 ---
 
-## 📄 Licença
+## 📄 License
 
-Distribuído sob a licença MIT.
+Distributed under the MIT License.

@@ -19,6 +19,7 @@ interface UserRecord {
   createdAt: number;
   upgradedAt?: number;
   connectedAt?: number;
+  lang?: 'en' | 'pt';
 }
 
 interface AskRecord {
@@ -33,6 +34,15 @@ interface AskRecord {
   messageId?: number;
   type?: 'question' | 'retry';
   command?: string;
+  lang?: 'en' | 'pt';
+}
+
+type SupportedLang = 'en' | 'pt';
+
+function getLang(user?: { lang?: 'en' | 'pt' } | null, langCode?: string | null): SupportedLang {
+  if (user?.lang === 'pt' || user?.lang === 'en') return user.lang;
+  if (langCode && langCode.toLowerCase().startsWith('pt')) return 'pt';
+  return 'en';
 }
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -137,6 +147,225 @@ function getTodayKey(): string {
   return now.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
+const MESSAGES = {
+  welcome: {
+    en: (token: string) => `🎉 <b>Welcome to Plim!</b>
+
+Plim monitors long terminal tasks and notifies your phone the second they finish.
+
+<b>1️⃣ Connect your terminal:</b>
+Copy and paste this command:
+<code>plim connect ${token}</code>
+
+<b>Or use directly with AI agents:</b>
+<code>npx plim-mcp</code>
+
+<b>2️⃣ Everyday usage:</b>
+• <code>plim run &lt;command&gt;</code> monitor builds, tests & deploys
+• <code>plim ask "Should I proceed?"</code> interactive Telegram approvals
+• <code>plim -n "Message"</code> instant desktop & phone push
+• <code>/install</code> how to install Plim on other machines
+• <code>/status</code> check your daily notification quota
+• <code>/pro</code> unlimited lifetime notifications
+• <code>/lang</code> change language (en / pt)`,
+    pt: (token: string) => `🎉 <b>Bem-vindo ao Plim!</b>
+
+O Plim monitora tarefas longas no seu Mac/Linux/Windows e te avisa no celular quando terminarem.
+
+<b>1️⃣ Conecte seu terminal:</b>
+Copie e cole o comando abaixo:
+<code>plim connect ${token}</code>
+
+<b>Ou use direto com agentes de IA:</b>
+<code>npx plim-mcp</code>
+
+<b>2️⃣ Como usar no dia a dia:</b>
+• <code>plim run &lt;comando&gt;</code> para monitorar builds e deploys
+• <code>plim ask "Posso prosseguir?"</code> para perguntas interativas
+• <code>plim -n "Mensagem"</code> para notificações rápidas
+• <code>/install</code> para ver como instalar em outra máquina
+• <code>/status</code> para ver sua cota diária
+• <code>/pro</code> para ter notificações ilimitadas
+• <code>/lang</code> alterar idioma (en / pt)`,
+  },
+  install: {
+    en: (token: string) => `📦 <b>How to Install Plim</b>
+
+In your terminal (macOS, Linux or WSL), run:
+<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash</code>
+
+Or install and connect in one step:
+<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash -s -- ${token}</code>
+
+<b>Run directly via NPM / NPX (Zero install):</b>
+<code>npx plim-mcp</code>`,
+    pt: (token: string) => `📦 <b>Como Instalar o Plim</b>
+
+No seu terminal (macOS, Linux ou WSL), rode:
+<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash</code>
+
+Ou instale e conecte em 1 linha só:
+<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash -s -- ${token}</code>
+
+<b>Executar direto via NPM / NPX (Sem instalação):</b>
+<code>npx plim-mcp</code>`,
+  },
+  status: {
+    en: (plan: string, usage: number, limit: number | string, token: string) => `📊 <b>Your Plim Account Status</b>
+
+👤 <b>Plan:</b> ${plan === 'pro' ? '⭐ PRO (Unlimited)' : '🆓 Free (50/day)'}
+📬 <b>Today usage:</b> ${usage} of ${plan === 'pro' ? '∞' : limit} notifications
+🔑 <b>Your Token:</b> <code>${token}</code>
+
+To connect on another computer:
+<code>plim connect ${token}</code>`,
+    pt: (plan: string, usage: number, limit: number | string, token: string) => `📊 <b>Status da sua conta Plim</b>
+
+👤 <b>Plano:</b> ${plan === 'pro' ? '⭐ PRO (Ilimitado)' : '🆓 Gratuito (50/dia)'}
+📬 <b>Uso hoje:</b> ${usage} de ${plan === 'pro' ? '∞' : limit} notificações
+🔑 <b>Seu Token:</b> <code>${token}</code>
+
+Para conectar em outro computador:
+<code>plim connect ${token}</code>`,
+  },
+  proBenefits: {
+    en: (stars: number) => `⭐ <b>Plim PRO Plan (Lifetime Access)</b>
+
+Eliminate limits and supercharge your developer workflow:
+✅ <b>Unlimited notifications</b> (no daily cap)
+✅ Priority message alerts in delivery queue
+✅ Expanded logs summary on Telegram
+✅ Support open-source development
+
+<b>Price:</b> ${stars} ⭐ Telegram Stars (one-time purchase via Apple Pay, Google Pay or Card inside Telegram).`,
+    pt: (stars: number) => `⭐ <b>Plano Plim PRO (Acesso Vitalício)</b>
+
+Elimine limites e turbine seu fluxo de desenvolvimento:
+✅ <b>Notificações ilimitadas</b> (sem teto diário)
+✅ Alertas prioritários na fila de mensagens
+✅ Resumo de logs expandido no Telegram
+✅ Apoie o projeto open-source
+
+<b>Valor:</b> ${stars} ⭐ Telegram Stars (pagamento único via Apple Pay, Google Pay ou Cartão direto no Telegram).`,
+  },
+  proInvoiceTitle: {
+    en: 'Plim PRO (Lifetime Access)',
+    pt: 'Plim PRO (Acesso Vitalício)',
+  },
+  proInvoiceDesc: {
+    en: 'Unlimited daily notifications and priority alerts for your terminal.',
+    pt: 'Notificações diárias ilimitadas e alertas prioritários no seu terminal.',
+  },
+  proAlready: {
+    en: `⭐ <b>You are already a Plim PRO user!</b>\n\nYour access is lifetime with unlimited notifications.`,
+    pt: `⭐ <b>Você já é um usuário Plim PRO!</b>\n\nSeu acesso é vitalício e você tem notificações ilimitadas.`,
+  },
+  proSuccess: {
+    en: `🎉 <b>CONGRATULATIONS! YOU ARE NOW PLIM PRO!</b> ⭐
+
+Your account has been upgraded:
+• <b>Unlimited</b> daily notifications
+• Priority alerts for deploys and builds
+• Lifetime access
+
+Thank you for supporting Plim! 🚀`,
+    pt: `🎉 <b>PARABÉNS! VOCÊ AGORA É PLIM PRO!</b> ⭐
+
+O seu plano foi atualizado com sucesso:
+• Notificações diárias <b>ilimitadas</b>
+• Alertas prioritários para deploys e builds
+• Acesso vitalício
+
+Obrigado por apoiar o desenvolvimento do Plim! 🚀`,
+  },
+  connected: {
+    en: `🎉 <b>Terminal Connected Successfully!</b>\n\nYour Plim is configured and ready to notify!\nTry running:\n<code>plim run sleep 2 &amp;&amp; echo "Deploy finished!"</code>`,
+    pt: `🎉 <b>Terminal Conectado com Sucesso!</b>\n\nO seu Plim está configurado e pronto para uso!\nTente rodar:\n<code>plim run sleep 2 &amp;&amp; echo "Deploy finalizado!"</code>`,
+  },
+  quotaLimit: {
+    en: (limit: number) => `⚠️ <b>Daily limit reached (${limit} notifications)</b>\n\nYou have reached your free daily quota. Send /pro to upgrade to the Unlimited plan!`,
+    pt: (limit: number) => `⚠️ <b>Limite diário atingido (${limit} notificações)</b>\n\nVocê atingiu sua cota gratuita por hoje. Envie /pro para fazer o upgrade para o plano Ilimitado!`,
+  },
+  resetToken: {
+    en: (token: string) => `🔑 <b>New token generated!</b>\n\nUpdate your terminal with:\n<code>plim connect ${token}</code>`,
+    pt: (token: string) => `🔑 <b>Novo token gerado!</b>\n\nAtualize seu terminal com:\n<code>plim connect ${token}</code>`,
+  },
+  help: {
+    en: `📖 <b>Plim User Guide</b>
+
+<b>In your Terminal:</b>
+• <code>plim run &lt;command&gt;</code>
+  Runs command, times duration, plays desktop audio, and sends result to Telegram.
+  <i>Example:</i> <code>plim run npm run build</code>
+
+• <code>plim ask "Question" [options]</code>
+  Interactive confirmation with inline buttons sent to your phone.
+
+• <code>plim -n "Message"</code>
+  Quick push notification with desktop alert.
+
+• <code>command | plim -n "Deploy"</code>
+  Pipes output to terminal and appends last lines to Telegram.
+
+• <code>plim test</code>
+  Test local sound and mobile notification.
+
+<b>Bot Commands:</b>
+/start - Setup & token
+/install - Install instructions
+/status - View quota & token
+/pro - Upgrade to Unlimited PRO ⭐
+/lang - Switch language (en / pt)
+/resettoken - Generate new API token`,
+    pt: `📖 <b>Guia de Uso do Plim</b>
+
+<b>No seu Terminal:</b>
+• <code>plim run &lt;comando&gt;</code>
+  Executa o comando, cronometra a duração, toca som no Mac e envia o resultado no Telegram.
+  <i>Exemplo:</i> <code>plim run npm run build</code>
+
+• <code>plim ask "Pergunta" [opções]</code>
+  Pergunta interativa com botões enviada para o seu celular.
+
+• <code>plim -n "Mensagem"</code>
+  Envia notificação rápida com som.
+
+• <code>comando | plim -n "Deploy"</code>
+  Lê a saída do terminal e anexa as últimas linhas no Telegram.
+
+• <code>plim test</code>
+  Testa o som local e o envio para o celular.
+
+<b>Comandos do Bot:</b>
+/start - Iniciar e ver seu token
+/install - Como instalar no terminal
+/status - Ver limites e notificações de hoje
+/pro - Upgrade para Plano Pro ⭐
+/lang - Alterar idioma (en / pt)
+/resettoken - Gerar nova chave de API`,
+  },
+  retryButtons: {
+    en: { retry: '🔁 Retry Execution', cancel: '🛑 Cancel' },
+    pt: { retry: '🔁 Repetir Execução', cancel: '🛑 Cancelar' },
+  },
+  askAnswered: {
+    en: (q: string, a: string) => `❓ <b>Plim Agent Question:</b>\n${escapeHtml(q)}\n\n✅ <b>Answered:</b> <code>${escapeHtml(a)}</code>`,
+    pt: (q: string, a: string) => `❓ <b>Pergunta do Agente Plim:</b>\n${escapeHtml(q)}\n\n✅ <b>Respondido:</b> <code>${escapeHtml(a)}</code>`,
+  },
+  retryAnswered: {
+    en: (cmd: string, retry: boolean) => `⚠️ <b>Failed Command:</b>\n<code>${escapeHtml(cmd)}</code>\n\n${retry ? '🔁 <b>Retry requested!</b>' : '🛑 <b>Execution canceled/ignored.</b>'}`,
+    pt: (cmd: string, retry: boolean) => `⚠️ <b>Comando com Falha:</b>\n<code>${escapeHtml(cmd)}</code>\n\n${retry ? '🔁 <b>Solicitada repetição da execução!</b>' : '🛑 <b>Execução cancelada/ignorada.</b>'}`,
+  },
+  callbackAnswered: {
+    en: 'This action was already answered!',
+    pt: 'Esta ação já foi respondida!',
+  },
+  callbackExpired: {
+    en: 'Question expired or not found.',
+    pt: 'Pergunta expirada ou inexistente.',
+  },
+};
+
 // ---------------------------------------------------------------------------
 // 1. Healthcheck & Setup de Comandos
 // ---------------------------------------------------------------------------
@@ -144,7 +373,7 @@ app.get('/', (c) => {
   return c.json({
     status: 'ok',
     service: 'Plim API & Telegram Worker',
-    version: '1.0.0',
+    version: '1.4.0',
     docs: 'https://github.com/marcusedu/plim',
   });
 });
@@ -153,12 +382,13 @@ app.get('/', (c) => {
 app.get('/setup-commands', async (c) => {
   const botToken = c.env.TELEGRAM_BOT_TOKEN;
   const commands = [
-    { command: 'start', description: 'Conectar seu terminal ao bot' },
-    { command: 'install', description: 'Como instalar o Plim no terminal' },
-    { command: 'status', description: 'Ver cota de hoje e token ativo' },
-    { command: 'pro', description: 'Upgrade para Plim Pro ⭐ (Ilimitado)' },
-    { command: 'help', description: 'Guia de comandos do terminal' },
-    { command: 'resettoken', description: 'Gerar uma nova chave de API' },
+    { command: 'start', description: 'Connect terminal / setup Plim' },
+    { command: 'install', description: 'How to install Plim CLI & MCP' },
+    { command: 'status', description: 'View quota and active token' },
+    { command: 'pro', description: 'Upgrade to Plim PRO ⭐ (Unlimited)' },
+    { command: 'lang', description: 'Change language / Alterar idioma' },
+    { command: 'help', description: 'Terminal usage guide' },
+    { command: 'resettoken', description: 'Generate a new API key' },
   ];
 
   const res = await fetch(`https://api.telegram.org/bot${botToken}/setMyCommands`, {
@@ -212,6 +442,7 @@ app.post('/webhook', async (c) => {
       const recordStr = await c.env.PLIM_KV.get(`ask:${askId}`);
       if (recordStr) {
         const record: AskRecord = JSON.parse(recordStr);
+        const lang: SupportedLang = record.lang || 'en';
         if (record.status === 'pending') {
           let selectedText = '';
           if (action === 'ask') {
@@ -223,21 +454,22 @@ app.post('/webhook', async (c) => {
           } else if (action === 'retry') {
             record.status = 'answered';
             record.answer = choice; // 'retry' | 'cancel'
-            selectedText = choice === 'retry' ? '🔁 Repetir Execução' : '🛑 Cancelado';
+            selectedText = choice === 'retry' ? MESSAGES.retryButtons[lang].retry : MESSAGES.retryButtons[lang].cancel;
           }
 
           // Salva no KV por 1 hora
           await c.env.PLIM_KV.put(`ask:${askId}`, JSON.stringify(record), { expirationTtl: 3600 });
 
           // Confirma o callback para remover o loading no Telegram
-          await answerTelegramCallbackQuery(botToken, cb.id, `Opção selecionada: ${selectedText}`);
+          const optLabel = lang === 'pt' ? `Opção selecionada: ${selectedText}` : `Option selected: ${selectedText}`;
+          await answerTelegramCallbackQuery(botToken, cb.id, optLabel);
 
           // Edita a mensagem removendo os botões inline e exibindo o status final
           let updatedText = '';
           if (action === 'ask') {
-            updatedText = `❓ <b>Pergunta do Agente Plim:</b>\n${escapeHtml(record.question)}\n\n✅ <b>Respondido:</b> <code>${escapeHtml(selectedText)}</code>`;
+            updatedText = MESSAGES.askAnswered[lang](record.question, selectedText);
           } else {
-            updatedText = `⚠️ <b>Comando com Falha:</b>\n<code>${escapeHtml(record.command || '')}</code>\n\n${choice === 'retry' ? '🔁 <b>Solicitada repetição da execução!</b>' : '🛑 <b>Execução cancelada/ignorada.</b>'}`;
+            updatedText = MESSAGES.retryAnswered[lang](record.command || '', choice === 'retry');
           }
 
           if (fromId && msgId) {
@@ -245,11 +477,11 @@ app.post('/webhook', async (c) => {
           }
           return c.json({ ok: true });
         } else {
-          await answerTelegramCallbackQuery(botToken, cb.id, 'Esta ação já foi respondida!');
+          await answerTelegramCallbackQuery(botToken, cb.id, MESSAGES.callbackAnswered[lang]);
           return c.json({ ok: true });
         }
       } else {
-        await answerTelegramCallbackQuery(botToken, cb.id, 'Pergunta expirada ou inexistente.');
+        await answerTelegramCallbackQuery(botToken, cb.id, 'Question expired or not found.');
         return c.json({ ok: true });
       }
     }
@@ -264,6 +496,7 @@ app.post('/webhook', async (c) => {
   }
 
   const chatId = message.chat.id;
+  const userLangCode = message.from?.language_code;
 
   // 2. Tratamento de Pagamento Concluído com Sucesso
   if (message.successful_payment) {
@@ -275,16 +508,8 @@ app.post('/webhook', async (c) => {
       await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
     }
 
-    const successMsg = `🎉 <b>PARABÉNS! VOCÊ AGORA É PLIM PRO!</b> ⭐
-
-O seu plano foi atualizado com sucesso:
-• Notificações diárias <b>ilimitadas</b>
-• Alertas prioritários para deploys e builds
-• Acesso vitalício
-
-Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
-
-    await sendTelegramMessage(botToken, chatId, successMsg);
+    const lang = getLang(user, userLangCode);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.proSuccess[lang]);
 
     // Notifica o administrador sobre a nova assinatura PRO
     const adminChatId = c.env.ADMIN_CHAT_ID ? parseInt(c.env.ADMIN_CHAT_ID, 10) : 517936688;
@@ -314,6 +539,7 @@ Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
       return JSON.parse(userStr);
     }
     const token = `plim_live_${crypto.randomUUID().replace(/-/g, '')}`;
+    const userLang = message.from?.language_code?.toLowerCase().startsWith('pt') ? 'pt' : 'en';
     const newUser: UserRecord = {
       chatId,
       token,
@@ -321,6 +547,7 @@ Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
       firstName: message.from?.first_name,
       plan: 'free',
       createdAt: Date.now(),
+      lang: userLang,
     };
     await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(newUser));
     await c.env.PLIM_KV.put(`token:${token}`, chatId.toString());
@@ -330,58 +557,58 @@ Obrigado por apoiar o desenvolvimento do Plim! 🚀`;
     if (adminChatId) {
       const name = newUser.firstName || 'Anônimo';
       const handle = newUser.username ? `@${newUser.username}` : `ID: ${chatId}`;
-      const adminNotice = `👋 <b>Novo Usuário Aderiu ao Plim!</b>\n\n👤 <b>Nome:</b> ${escapeHtml(name)}\n📱 <b>Usuário:</b> ${escapeHtml(handle)}\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+      const langBadge = userLang === 'pt' ? '🇧🇷 PT' : '🌐 EN';
+      const adminNotice = `👋 <b>Novo Usuário Aderiu ao Plim!</b> [${langBadge}]\n\n👤 <b>Nome:</b> ${escapeHtml(name)}\n📱 <b>Usuário:</b> ${escapeHtml(handle)}\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
       await sendTelegramMessage(botToken, adminChatId, adminNotice);
     }
 
     return newUser;
   }
 
+  // Comando /lang [en|pt]
+  if (text.startsWith('/lang') || text.startsWith('/language') || text.startsWith('/idioma')) {
+    const user = await getOrCreateUser();
+    const parts = text.split(/\s+/);
+    const chosenLang = parts[1]?.toLowerCase();
+
+    if (chosenLang === 'en' || chosenLang === 'pt') {
+      user.lang = chosenLang;
+      await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
+      const msg = chosenLang === 'en'
+        ? '🌐 <b>Language updated to English!</b>'
+        : '🌐 <b>Idioma alterado para Português!</b>';
+      await sendTelegramMessage(botToken, chatId, msg);
+      return c.json({ ok: true });
+    }
+
+    const currentLang = getLang(user, userLangCode);
+    const promptMsg = currentLang === 'en'
+      ? `🌐 <b>Current Language:</b> English\n\nTo switch language, send:\n• <code>/lang en</code> - English\n• <code>/lang pt</code> - Português`
+      : `🌐 <b>Idioma Atual:</b> Português\n\nPara alterar o idioma, envie:\n• <code>/lang en</code> - English\n• <code>/lang pt</code> - Português`;
+    await sendTelegramMessage(botToken, chatId, promptMsg);
+    return c.json({ ok: true });
+  }
+
   // Comando /start
   if (text.startsWith('/start')) {
     const user = await getOrCreateUser();
-
-    const welcomeMsg = `🎉 <b>Bem-vindo ao Plim!</b>
-
-O Plim monitora tarefas longas no seu Mac/Linux e te avisa no celular quando terminarem.
-
-<b>1️⃣ Conecte seu terminal:</b>
-Copie e cole o comando abaixo:
-<code>plim connect ${user.token}</code>
-
-<b>2️⃣ Como usar no dia a dia:</b>
-• <code>plim run &lt;comando&gt;</code> para monitorar builds e deploys
-• <code>plim -n "Mensagem"</code> para notificações rápidas
-• <code>/install</code> para ver como instalar o Plim em outra máquina
-• <code>/status</code> para ver sua cota diária
-• <code>/pro</code> para ter notificações ilimitadas`;
-
-    await sendTelegramMessage(botToken, chatId, welcomeMsg);
+    const lang = getLang(user, userLangCode);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.welcome[lang](user.token));
     return c.json({ ok: true });
   }
 
   // Comando /install
   if (text.startsWith('/install') || text.startsWith('/instalar')) {
     const user = await getOrCreateUser();
-    const installMsg = `📦 <b>Como Instalar o Plim</b>
-
-No seu terminal (macOS ou Linux), rode o instalador oficial:
-
-<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash</code>
-
-Depois de instalado, ative a sua conta:
-<code>plim connect ${user.token}</code>
-
-Ou instale e conecte em 1 linha só:
-<code>curl -fsSL https://raw.githubusercontent.com/marcusedu/plim/main/install.sh | bash -s -- ${user.token}</code>`;
-
-    await sendTelegramMessage(botToken, chatId, installMsg);
+    const lang = getLang(user, userLangCode);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.install[lang](user.token));
     return c.json({ ok: true });
   }
 
   // Comando /status
   if (text.startsWith('/status')) {
     const user = await getOrCreateUser();
+    const lang = getLang(user, userLangCode);
     const today = getTodayKey();
     const usageStr = await c.env.PLIM_KV.get(`usage:${chatId}:${today}`);
     const usage = usageStr ? parseInt(usageStr, 10) : 0;
@@ -389,49 +616,29 @@ Ou instale e conecte em 1 linha só:
       ? parseInt(c.env.PRO_TIER_DAILY_LIMIT || '5000', 10)
       : parseInt(c.env.FREE_TIER_DAILY_LIMIT || '50', 10);
 
-    const statusMsg = `📊 <b>Status da sua conta Plim</b>
-
-👤 <b>Plano:</b> ${user.plan === 'pro' ? '⭐ PRO (Ilimitado)' : '🆓 Gratuito (50/dia)'}
-📬 <b>Uso hoje:</b> ${usage} de ${user.plan === 'pro' ? '∞' : limit} notificações
-🔑 <b>Seu Token:</b> <code>${user.token}</code>
-
-Para conectar em outro computador:
-<code>plim connect ${user.token}</code>`;
-
-    await sendTelegramMessage(botToken, chatId, statusMsg);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.status[lang](user.plan, usage, limit, user.token));
     return c.json({ ok: true });
   }
 
   // Comando /pro ou /upgrade (Fatura com Telegram Stars)
   if (text.startsWith('/pro') || text.startsWith('/upgrade') || text.startsWith('/comprar')) {
     const user = await getOrCreateUser();
+    const lang = getLang(user, userLangCode);
 
     if (user.plan === 'pro') {
-      await sendTelegramMessage(botToken, chatId, `⭐ <b>Você já é um usuário Plim PRO!</b>\n\nSeu acesso é vitalício e você tem notificações ilimitadas.`);
+      await sendTelegramMessage(botToken, chatId, MESSAGES.proAlready[lang]);
       return c.json({ ok: true });
     }
 
     const starsAmount = parseInt(c.env.PRO_PRICE_STARS || '150', 10); // Padrão: 150 Telegram Stars (~$2.99)
-
-    // Envia primeiro a descrição dos benefícios
-    const proBenefits = `⭐ <b>Plano Plim PRO (Acesso Vitalício)</b>
-
-Elimine limites e turbine seu fluxo de desenvolvimento:
-✅ <b>Notificações ilimitadas</b> (sem teto diário)
-✅ Alertas prioritários na fila de mensagens
-✅ Resumo de logs expandido no Telegram
-✅ Apoie o projeto open-source
-
-<b>Valor:</b> ${starsAmount} ⭐ Telegram Stars (pagamento único via Apple Pay, Google Pay ou Cartão direto no Telegram).`;
-
-    await sendTelegramMessage(botToken, chatId, proBenefits);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.proBenefits[lang](starsAmount));
 
     // Envia a fatura nativa do Telegram Stars
     await sendTelegramInvoice(
       botToken,
       chatId,
-      'Plim PRO (Acesso Vitalício)',
-      'Notificações diárias ilimitadas e alertas prioritários no seu terminal.',
+      MESSAGES.proInvoiceTitle[lang],
+      MESSAGES.proInvoiceDesc[lang],
       `upgrade_${chatId}_${Date.now()}`,
       starsAmount
     );
@@ -442,6 +649,7 @@ Elimine limites e turbine seu fluxo de desenvolvimento:
   // Comando /resettoken
   if (text.startsWith('/resettoken')) {
     const user = await getOrCreateUser();
+    const lang = getLang(user, userLangCode);
     await c.env.PLIM_KV.delete(`token:${user.token}`);
 
     const newToken = `plim_live_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -449,40 +657,15 @@ Elimine limites e turbine seu fluxo de desenvolvimento:
     await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
     await c.env.PLIM_KV.put(`token:${newToken}`, chatId.toString());
 
-    await sendTelegramMessage(
-      botToken,
-      chatId,
-      `🔑 <b>Novo token gerado!</b>\n\nAtualize seu terminal com:\n<code>plim connect ${newToken}</code>`
-    );
+    await sendTelegramMessage(botToken, chatId, MESSAGES.resetToken[lang](newToken));
     return c.json({ ok: true });
   }
 
   // Comando /help
   if (text.startsWith('/help') || text.startsWith('/ajuda')) {
-    const helpMsg = `📖 <b>Guia de Uso do Plim</b>
-
-<b>No seu Terminal:</b>
-• <code>plim run &lt;comando&gt;</code>
-  Executa o comando, cronometra a duração, toca som no Mac e envia o resultado no Telegram.
-  <i>Exemplo:</i> <code>plim run npm run build</code>
-
-• <code>plim -n "Mensagem"</code>
-  Envia notificação rápida com som.
-
-• <code>comando | plim -n "Deploy"</code>
-  Lê a saída do terminal e anexa as últimas linhas no Telegram.
-
-• <code>plim test</code>
-  Testa o som local e o envio para o celular.
-
-<b>Comandos do Bot:</b>
-/start - Iniciar e ver seu token
-/install - Como instalar no terminal
-/status - Ver limites e notificações de hoje
-/pro - Upgrade para Plano Pro ⭐
-/resettoken - Gerar nova chave de API`;
-
-    await sendTelegramMessage(botToken, chatId, helpMsg);
+    const user = await getOrCreateUser();
+    const lang = getLang(user, userLangCode);
+    await sendTelegramMessage(botToken, chatId, MESSAGES.help[lang]);
     return c.json({ ok: true });
   }
 
@@ -570,12 +753,14 @@ app.post('/api/notify', async (c) => {
     ? parseInt(c.env.PRO_TIER_DAILY_LIMIT || '5000', 10)
     : parseInt(c.env.FREE_TIER_DAILY_LIMIT || '50', 10);
 
+  const lang = getLang(user, null);
+
   if (currentUsage >= limit) {
     if (currentUsage === limit) {
       await sendTelegramMessage(
         c.env.TELEGRAM_BOT_TOKEN,
         chatId,
-        `⚠️ <b>Limite diário atingido (${limit} notificações)</b>\n\nVocê atingiu sua cota gratuita por hoje. Envie /pro para fazer o upgrade para o plano Ilimitado!`
+        MESSAGES.quotaLimit[lang](limit)
       );
     }
     return c.json({ error: 'Limite diário de notificações excedido.', usage: currentUsage, limit }, 429);
@@ -598,7 +783,8 @@ app.post('/api/notify', async (c) => {
     formattedText += `\n${escapeHtml(payload.body)}`;
   }
   if (payload.duration) {
-    formattedText += `\n⏱ <b>Duração:</b> ${payload.duration}`;
+    const durLabel = lang === 'pt' ? 'Duração:' : 'Duration:';
+    formattedText += `\n⏱ <b>${durLabel}</b> ${payload.duration}`;
   }
   if (payload.log) {
     let safeLog = escapeHtml(payload.log);
@@ -640,10 +826,11 @@ app.post('/api/connect', async (c) => {
     await c.env.PLIM_KV.put(`user:${chatId}`, JSON.stringify(user));
   }
 
+  const lang = getLang(user, null);
   await sendTelegramMessage(
     c.env.TELEGRAM_BOT_TOKEN,
     chatId,
-    `🎉 <b>Terminal Conectado com Sucesso!</b>\n\nO seu Plim está configurado e pronto para uso!\nTente rodar:\n<code>plim run sleep 2 &amp;&amp; echo "Deploy finalizado!"</code>`
+    MESSAGES.connected[lang]
   );
 
   // Notifica o administrador que o usuário configurou o terminal com sucesso
@@ -652,7 +839,8 @@ app.post('/api/connect', async (c) => {
     const name = user?.firstName || 'Anônimo';
     const handle = user?.username ? `@${user.username}` : `ID: ${chatId}`;
     const statusBadge = isFirstConnection ? '🟢 Primeira Configuração' : '🔄 Reconexão';
-    const adminMsg = `💻 <b>Terminal Configurado com Sucesso!</b>\n\n${statusBadge}\n👤 <b>Usuário:</b> ${escapeHtml(name)} (${escapeHtml(handle)})\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${body.token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
+    const langBadge = lang === 'pt' ? '🇧🇷 PT' : '🌐 EN';
+    const adminMsg = `💻 <b>Terminal Configurado com Sucesso!</b> [${langBadge}]\n\n${statusBadge}\n👤 <b>Usuário:</b> ${escapeHtml(name)} (${escapeHtml(handle)})\n🆔 <b>Chat ID:</b> <code>${chatId}</code>\n🔑 <b>Token:</b> <code>${body.token}</code>\n📅 <b>Data:</b> ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`;
 
     await sendTelegramMessage(c.env.TELEGRAM_BOT_TOKEN, adminChatId, adminMsg);
   }
@@ -678,6 +866,10 @@ app.post('/api/ask', async (c) => {
   }
 
   const chatId = parseInt(chatIdStr, 10);
+  const userStr = await c.env.PLIM_KV.get(`user:${chatId}`);
+  const user: UserRecord | null = userStr ? JSON.parse(userStr) : null;
+  const lang = getLang(user, null);
+
   const payload = await c.req.json<{
     question?: string;
     options?: string[];
@@ -691,17 +883,20 @@ app.post('/api/ask', async (c) => {
 
   const askId = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   const isRetry = payload.type === 'retry';
-  const options = payload.options && payload.options.length > 0 ? payload.options : ['Sim', 'Não'];
+  const defaultOpts = lang === 'pt' ? ['Sim', 'Não'] : ['Yes', 'No'];
+  const options = payload.options && payload.options.length > 0 ? payload.options : defaultOpts;
+  const retryOpts = [MESSAGES.retryButtons[lang].retry, MESSAGES.retryButtons[lang].cancel];
 
   const record: AskRecord = {
     id: askId,
     chatId,
-    question: payload.question || `O comando falhou: ${payload.command}`,
-    options: isRetry ? ['Repetir', 'Cancelar'] : options,
+    question: payload.question || (lang === 'pt' ? `O comando falhou: ${payload.command}` : `Command failed: ${payload.command}`),
+    options: isRetry ? retryOpts : options,
     status: 'pending',
     createdAt: Date.now(),
     type: isRetry ? 'retry' : 'question',
     command: payload.command,
+    lang,
   };
 
   // Monta teclado inline
@@ -709,8 +904,8 @@ app.post('/api/ask', async (c) => {
   if (isRetry) {
     inlineKeyboard = [
       [
-        { text: '🔁 Repetir Execução', callback_data: `retry:${askId}:retry` },
-        { text: '🛑 Cancelar', callback_data: `retry:${askId}:cancel` },
+        { text: MESSAGES.retryButtons[lang].retry, callback_data: `retry:${askId}:retry` },
+        { text: MESSAGES.retryButtons[lang].cancel, callback_data: `retry:${askId}:cancel` },
       ],
     ];
   } else {
@@ -734,9 +929,13 @@ app.post('/api/ask', async (c) => {
 
   let messageText = '';
   if (isRetry) {
-    messageText = `⚠️ <b>Comando com Falha no Terminal:</b>\n<code>${escapeHtml(payload.command || '')}</code>\n\n<i>Deseja tentar executar novamente agora?</i>`;
+    messageText = lang === 'pt'
+      ? `⚠️ <b>Comando com Falha no Terminal:</b>\n<code>${escapeHtml(payload.command || '')}</code>\n\n<i>Deseja tentar executar novamente agora?</i>`
+      : `⚠️ <b>Command Failed in Terminal:</b>\n<code>${escapeHtml(payload.command || '')}</code>\n\n<i>Do you want to retry execution now?</i>`;
   } else {
-    messageText = `❓ <b>Pergunta do Agente Plim:</b>\n\n${escapeHtml(payload.question || '')}\n\n<i>Selecione uma opção abaixo:</i>`;
+    messageText = lang === 'pt'
+      ? `❓ <b>Pergunta do Agente Plim:</b>\n\n${escapeHtml(payload.question || '')}\n\n<i>Selecione uma opção abaixo:</i>`
+      : `❓ <b>Plim Agent Question:</b>\n\n${escapeHtml(payload.question || '')}\n\n<i>Select an option below:</i>`;
   }
 
   const tgRes = await sendTelegramMessage(c.env.TELEGRAM_BOT_TOKEN, chatId, messageText, {

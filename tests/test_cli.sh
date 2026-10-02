@@ -92,6 +92,27 @@ RUN_FAIL_EXIT=0
 "$PLIM_BIN" run false >/dev/null 2>&1 || RUN_FAIL_EXIT=$?
 assert_eq "plim run false propaga exit code 1" "1" "$RUN_FAIL_EXIT"
 
+# 9. Internacionalização (i18n) - Comandos e Saídas em Inglês e Português
+HELP_EN=$(PLIM_LANG=en "$PLIM_BIN" --help)
+assert_contains "Help em inglês contém 'Usage:'" "Usage:" "$HELP_EN"
+assert_contains "Help em inglês contém 'plim lang [en|pt]'" "plim lang [en|pt]" "$HELP_EN"
+
+HELP_PT=$(PLIM_LANG=pt "$PLIM_BIN" --help)
+assert_contains "Help em português contém 'Uso:'" "Uso:" "$HELP_PT"
+assert_contains "Help em português contém 'plim lang [en|pt]'" "plim lang [en|pt]" "$HELP_PT"
+
+LANG_EN_OUT=$(PLIM_LANG=en "$PLIM_BIN" lang)
+assert_contains "plim lang em inglês indica English" "Current language: English (en)" "$LANG_EN_OUT"
+
+LANG_PT_OUT=$(PLIM_LANG=pt "$PLIM_BIN" lang)
+assert_contains "plim lang em português indica Português" "Idioma atual: Português (pt)" "$LANG_PT_OUT"
+
+RUN_EN_OUT=$(PLIM_LANG=en "$PLIM_BIN" run true 2>&1)
+assert_contains "plim run em inglês exibe 'Running:'" "Running:" "$RUN_EN_OUT"
+
+RUN_PT_OUT=$(PLIM_LANG=pt "$PLIM_BIN" run true 2>&1)
+assert_contains "plim run em português exibe 'Executando:'" "Executando:" "$RUN_PT_OUT"
+
 echo "----------------------------------------"
 echo "📊 Resumo dos Testes CLI: $PASSED/$TOTAL passaram ($FAILED falhas)"
 

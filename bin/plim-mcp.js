@@ -53,6 +53,7 @@ function loadPlimConfig() {
 
   let apiKey = process.env.PLIM_API_KEY || null;
   let apiUrl = process.env.PLIM_API_URL || 'https://plim-api.marcusedu.workers.dev';
+  let lang = process.env.PLIM_LANG || null;
 
   for (const p of configPaths) {
     if (fs.existsSync(p)) {
@@ -60,13 +61,20 @@ function loadPlimConfig() {
         const content = fs.readFileSync(p, 'utf8');
         const keyMatch = content.match(/PLIM_API_KEY=["']?([^"'\r\n]+)["']?/);
         const urlMatch = content.match(/PLIM_API_URL=["']?([^"'\r\n]+)["']?/);
+        const langMatch = content.match(/PLIM_LANG=["']?([^"'\r\n]+)["']?/);
         if (keyMatch) apiKey = keyMatch[1];
         if (urlMatch) apiUrl = urlMatch[1];
+        if (langMatch) lang = langMatch[1];
       } catch (e) {}
     }
   }
 
-  return { apiKey, apiUrl };
+  if (!lang) {
+    const sysLocale = process.env.LANG || process.env.LC_ALL || '';
+    lang = sysLocale.startsWith('pt') ? 'pt' : 'en';
+  }
+
+  return { apiKey, apiUrl, lang };
 }
 
 const TOOLS = [
@@ -106,7 +114,7 @@ const TOOLS = [
         options: {
           type: 'array',
           items: { type: 'string' },
-          description: 'List of selectable option labels (e.g. ["Sim", "Não"] or ["Abordagem A", "Abordagem B", "Cancelar"]). Defaults to ["Sim", "Não"].',
+          description: 'List of selectable option labels (e.g. ["Yes", "No"] or ["Approach A", "Approach B", "Cancel"]). Defaults to ["Yes", "No"] (or ["Sim", "Não"] for Portuguese locale).',
         },
         timeout: {
           type: 'number',
@@ -160,7 +168,7 @@ function handleRequest(req) {
       },
       serverInfo: {
         name: 'plim-mcp',
-        version: '1.3.0',
+        version: '1.4.0',
       },
     });
   }
@@ -225,10 +233,11 @@ function handleRequest(req) {
 
     if (name === 'plim_ask') {
       const question = args.question;
-      const options = Array.isArray(args.options) && args.options.length > 0 ? args.options : ['Sim', 'Não'];
+      const { apiKey, apiUrl, lang } = loadPlimConfig();
+      const defaultOptions = lang === 'pt' ? ['Sim', 'Não'] : ['Yes', 'No'];
+      const options = Array.isArray(args.options) && args.options.length > 0 ? args.options : defaultOptions;
       const timeoutSec = Math.min(Math.max(args.timeout || 300, 10), 900);
 
-      const { apiKey, apiUrl } = loadPlimConfig();
       if (!apiKey) {
         return sendResponse(id, {
           content: [{ type: 'text', text: 'Error: Plim is not connected. Run `plim connect <token>` first.' }],
@@ -327,8 +336,11 @@ function handleRequest(req) {
 
           // Se falhou e retry_on_failure está ativado, pergunta no Telegram
           if (exitCode !== 0 && retryOnFailure && attempt === 1) {
-            const { apiKey, apiUrl } = loadPlimConfig();
+            const { apiKey, apiUrl, lang } = loadPlimConfig();
             if (apiKey) {
+              const retryQuestion = lang === 'pt'
+                ? `O comando falhou com exit code ${exitCode}. Deseja repetir?`
+                : `Command failed with exit code ${exitCode}. Do you want to retry?`;
               try {
                 const askRes = await fetch(`${apiUrl}/api/ask`, {
                   method: 'POST',
@@ -339,7 +351,7 @@ function handleRequest(req) {
                   body: JSON.stringify({
                     type: 'retry',
                     command: targetCmd,
-                    question: `O comando falhou com exit code ${exitCode}. Deseja repetir?`,
+                    question: retryQuestion,
                   }),
                 });
                 const askData = await askRes.json();

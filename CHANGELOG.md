@@ -5,6 +5,29 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.4.0] - 2026-10-01
+
+### ✨ Adicionado
+- **Internacionalização Completa (i18n - Inglês e Português)**:
+  - **Telegram Bot & Cloudflare Worker**:
+    - Dicionário centralizado de mensagens bilíngues (`en` e `pt`).
+    - Detecção automática do idioma nativo do usuário pelo Telegram (`language_code`).
+    - Novo comando Telegram `/lang [en|pt]` para alterar o idioma de preferência a qualquer momento.
+    - Comandos (`/start`, `/install`, `/status`, `/pro`, `/resettoken`, `/help`), botões inline (`[Yes / No]`, `[Repeat Execution / Cancel]`), faturas de upgrade e alertas de cota traduzidos.
+  - **CLI do Plim (`bin/plim` & `bin/plim.ps1`)**:
+    - Resolução automática de idioma baseada em `$PLIM_LANG`, arquivo de configuração ou locale do sistema (`$LANG` / `$LC_ALL`).
+    - Novo comando `plim lang [en|pt]` para consultar ou salvar o idioma preferido.
+    - Mensagens de monitoramento (`Running:` vs `Executando:`), relatórios de término, ajuda (`--help`), diagnóstico (`plim test`) e prompts interativos (`plim ask`) bilíngues.
+  - **Servidor MCP (`bin/plim-mcp.js`)**:
+    - Ferramenta `plim_ask` com opções padrão dinâmicas (`['Yes', 'No']` para inglês, `['Sim', 'Não']` para português).
+    - Perguntas interativas de retry no Telegram traduzidas conforme o idioma configurado.
+  - **Documentação Bilíngue**:
+    - `README.md` traduzido para inglês com alta qualidade técnica para alcance internacional no GitHub e NPM.
+    - Criado `README.pt-BR.md` dedicado para a comunidade de língua portuguesa.
+    - Seletor de idioma no topo de ambos os arquivos (`🌐 English | Português`).
+
+---
+
 ## [1.3.0] - 2026-10-01
 
 ### ✨ Adicionado

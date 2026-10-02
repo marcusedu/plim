@@ -1,6 +1,6 @@
 {
   "name": "plim-worker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Cloudflare Worker backend for Plim CLI and Telegram Bot",
   "main": "src/index.ts",
   "scripts": {
