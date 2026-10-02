@@ -15,8 +15,10 @@ Acompanha servidor **Model Context Protocol (MCP)** para agentes de IA e backend
 ## ✨ Funcionalidades
 
 - **Monitor de Comandos (`plim run`)**: Executa qualquer comando ou script, cronometra a duração, detecta sucesso ou falha, emite som característico (`Ping` ou `Basso`), exibe notificação local e despacha relatório para o Telegram com as últimas linhas do output.
+- **Mensagens de Progresso Dinâmico (`plim progress` e `plim run --progress`)**: Live Status com atualização in-place no Telegram (`editMessageText`), barra de progresso visual em blocos (`[████░░░░] 50%`) e checklist de etapas (`⏳ -> ✅ -> ❌`) para comandos encadeados (`cmd1; cmd2; cmd3`) e pipelines, eliminando poluição no chat.
+- **Modo Auto-Plim (Shell Hook Transparente)**: Monitora automaticamente comandos demorados (> 30s) e encadeamentos (`cmd1; cmd2; cmd3`) no Zsh, Bash e Fish com alertas sonoros e push no Telegram, sem precisar digitar `plim run`.
 - **Perguntas Interativas no Celular (`plim ask`)**: Faça perguntas com botões de múltipla escolha via Telegram para aprovar migrações, deploys ou decisões de código pelo celular.
-- **Servidor MCP para Agentes de IA (`plim mcp` ou `npx -y plim-mcp`)**: Integração oficial com Claude Desktop, Cursor, Windsurf, Cline e Antigravity.
+- **Servidor MCP para Agentes de IA (`plim mcp` ou `npx -y plim-mcp`)**: Integração oficial com Claude Desktop, Cursor, Windsurf, Cline e Antigravity (ferramentas `plim_notify`, `plim_ask`, `plim_run`, `plim_progress`).
 - **Internacionalização (i18n)**: Suporte completo a **Inglês** e **Português**, detectado automaticamente pelo sistema ou configurável via `plim lang [en|pt]`.
 - **Onboarding Instantâneo com Telegram**: Abra o bot [@plim_the_bot](https://t.me/plim_the_bot), envie `/start` e conecte seu terminal com `plim connect <token>`.
 - **Suporte a Pipes (`| plim -n`)**: Envie logs ou confirmações encadeadas diretamente no terminal.
@@ -82,7 +84,42 @@ plim ask "Deseja aplicar a migração em produção?"
 plim ask "Qual estratégia de deploy?" "Canary" "Blue/Green" "Rollback"
 ```
 
-### 3. Notificação avulsa ou via pipe
+### 3. Progresso Dinâmico e Comandos Encadeados (`plim progress`)
+Execute comandos encadeados sequenciais com acompanhamento em tempo real no Telegram sem poluir o chat:
+
+```bash
+# Executa cadeia de comandos com Live Status visual no Telegram:
+plim run --progress "flutter clean; npm run build:all; sleep 15; firebase deploy -P production"
+# ou
+plim progress run "flutter clean; npm run build:all; sleep 15; firebase deploy -P production"
+
+# Uso programático em scripts personalizados:
+ID=$(plim progress start "Pipeline de Release" "Dependências" "Build" "Testes" "Deploy")
+plim progress update "$ID" --percent 25 --text "Compilando assets do front-end..."
+plim progress update "$ID" --percent 75 --text "Executando testes automatizados..."
+plim progress finish "$ID" --status success --text "Deploy finalizado com sucesso em produção! 🚀"
+```
+
+### 4. Modo Auto-Plim (Shell Hook Transparente)
+Monitore automaticamente qualquer comando ou encadeamento que levar mais de 30 segundos, sem precisar lembrar de digitar `plim run`:
+
+```bash
+# 1. Instalação rápida no seu shell atual (Zsh, Bash ou Fish):
+plim hook install
+
+# 2. Ou ativação manual no ~/.zshrc (ou ~/.bashrc):
+eval "$(plim hook zsh)"
+
+# 3. Suporte a comandos encadeados com ;, && ou ||:
+plim run flutter clean;npm run build:all;sleep 15;firebase deploy -P production
+# ➔ Ao terminar, você recebe o alerta no celular:
+# ⛓️ (4 comandos) flutter clean ➔ npm run build:all ➔ sleep 15 ➔ firebase deploy -P production
+
+# 4. Verificar status e configurações:
+plim hook status
+```
+
+### 5. Notificação avulsa ou via pipe
 
 ```bash
 # Notificação simples
@@ -92,7 +129,7 @@ plim -n "Deploy em homologação concluído!"
 cat deploy.log | plim -n "Deploy finalizado"
 ```
 
-### 4. Idioma (Internacionalização)
+### 6. Idioma (Internacionalização)
 ```bash
 # Ver idioma atual
 plim lang
@@ -102,12 +139,12 @@ plim lang en
 plim lang pt
 ```
 
-### 5. Testar a conexão
+### 7. Testar a conexão
 ```bash
 plim test
 ```
 
-### 6. Efeitos sonoros locais
+### 8. Efeitos sonoros locais
 
 ```bash
 # Toca um som aleatório
@@ -192,6 +229,13 @@ plim/
 | --- | --- |
 | `plim ask <pergunta> [opções]` | Envia pergunta interativa com botões no Telegram e aguarda resposta |
 | `plim run <comando>` | Executa comando, mede tempo, detecta status e notifica com log |
+| `plim run --progress <cmds>` | Executa cadeia de comandos com Live Status no Telegram |
+| `plim progress run <cmds>` | Executa cadeia de comandos com Live Status no Telegram |
+| `plim progress start/update/...` | Gerencia mensagens dinâmicas de progresso no Telegram |
+| `plim hook [zsh\|bash\|fish]` | Gera script de hook do Auto-Plim para o shell especificado |
+| `plim hook install` | Instala o hook do Auto-Plim no perfil do shell atual |
+| `plim hook status` | Exibe o status e configurações ativas do Auto-Plim |
+| `plim hook test` | Simula um disparo de notificação do Auto-Plim |
 | `plim connect <token>` | Conecta ao bot [@plim_the_bot](https://t.me/plim_the_bot) |
 | `plim lang [en\|pt]` | Exibe ou define o idioma da CLI |
 | `plim mcp` | Inicia servidor MCP para agentes de IA (Claude, Cursor, Windsurf) |

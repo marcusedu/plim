@@ -1,6 +1,6 @@
 {
   "name": "plim-mcp",
-  "version": "1.4.1",
+  "version": "1.6.0",
   "description": "Native desktop audio alerts, interactive Telegram questions, and command monitoring for AI coding agents (Claude, Cursor, Windsurf, Antigravity)",
   "bin": {
     "plim-mcp": "bin/plim-mcp.js",

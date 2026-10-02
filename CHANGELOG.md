@@ -5,6 +5,45 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.6.0] - 2026-10-02
+
+### ✨ Adicionado
+- **Mensagens de Progresso Dinâmico (Live Status / Edit In-Place)**:
+  - **Execução Encadeada com Live Status**:
+    - Novo subcomando `plim progress run "<cmds>"` e flag `plim run --progress "<cmds>"` (ou `-P`).
+    - Decompõe comandos encadeados com `;`, `&&` ou `||` (ex: `flutter clean; npm run build:all; sleep 15; firebase deploy -P production`) em etapas atômicas.
+    - Atualiza em tempo real uma única mensagem no Telegram usando `editMessageText`, eliminando poluição de chat e múltiplos alertas desnecessários.
+    - Renderização visual elegante no Telegram: barra de progresso em blocos (`[████████░░░░] 50%`), checklist com ícones dinâmicos (`⏳` ativa, `✅` concluída, `◻️` pendente, `❌` falha), status contextual e tempo decorrido.
+    - Interrupção imediata da cadeia em caso de falha de qualquer etapa intermediária com notificação de erro e som nativo.
+  - **Subcomandos Programáticos da CLI**:
+    - `plim progress start "Título" [passos...]`: Inicia sessão de progresso e retorna o ID único.
+    - `plim progress update <id> --percent N --text "msg"`: Atualiza o percentual e status na mensagem ativa.
+    - `plim progress finish <id> --status success|error --text "msg"`: Conclui a mensagem com status final e emite som característico.
+  - **Ferramenta MCP para Agentes de IA (`plim_progress`)**:
+    - Nova ferramenta registrada no servidor MCP (`bin/plim-mcp.js`) com suporte às ações `start`, `update` e `finish`.
+    - Agentes de IA (Claude Desktop, Cursor, Antigravity, Cline) agora podem reportar tarefas longas (refatorações, pipelines) diretamente no celular do desenvolvedor através de uma única mensagem viva.
+  - **Backend Cloudflare Worker (`/api/progress/*`)**:
+    - Novos endpoints `POST /api/progress/start`, `POST /api/progress/update` e `POST /api/progress/finish`.
+    - Persistência das sessões e metadados no Cloudflare KV (`progress:<id>`) com TTL automático.
+
+---
+
+## [1.5.0] - 2026-10-02
+
+### ✨ Adicionado
+- **Modo Auto-Plim (Shell Hook Transparente)**:
+  - Novo comando `plim hook [zsh|bash|fish]` que gera scripts de ciclo de vida (`preexec`/`precmd`) para Zsh, Bash (3.2+) e Fish.
+  - Instalação e remoção com 1 clique via `plim hook install` e `plim hook uninstall` no `~/.zshrc`, `~/.bashrc`, `~/.bash_profile` ou `~/.config/fish/config.fish`.
+  - Diagnóstico e configuração via `plim hook status` e simulação com `plim hook test`.
+  - Disparo de som nativo (`Ping` / `Basso`), notificação local no desktop e alerta push no Telegram sempre que qualquer comando exceder o limiar configurado (padrão: 30 segundos, customizável via `PLIM_AUTO_THRESHOLD`).
+- **Suporte Avançado a Comandos Encadeados (`format_chained_cmd`)**:
+  - Detecção e formatação visual de comandos encadeados com `;`, `&&` ou `||` (ex: `plim run flutter clean;npm run build:all;sleep 15;firebase deploy -P production`).
+  - Formatação concisa e legível com contagem de etapas e setas: `⛓️ (4 comandos) flutter clean ➔ npm run build:all ➔ sleep 15 ➔ firebase deploy -P production` (ou `4 commands` em inglês).
+  - Prevenção inteligente de duplicação: comandos únicos invocados via `plim run` não disparam alertas redundantes no hook, mas comandos compostos continuam sendo monitorados até o término do último processo da cadeia.
+  - Filtro para ignorar comandos interativos comuns (`vim`, `nvim`, `nano`, `ssh`, `tmux`, `less`, `tail`, `python`, etc.).
+
+---
+
 ## [1.4.1] - 2026-10-01
 
 ### ✨ Adicionado
