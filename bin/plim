@@ -22,13 +22,17 @@ if [[ -z "$PLIM_LANG" ]]; then
     fi
 fi
 
-PLIM_VERSION="1.4.1"
+PLIM_VERSION="1.6.0"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 
 SOUNDS_DIR="/System/Library/Sounds"
 DEFAULT_API_URL="https://plim-api.marcusedu.workers.dev"
 API_URL="${PLIM_API_URL:-$DEFAULT_API_URL}"
+
+# Configurações do Modo Auto-Plim (Shell Hook)
+DEFAULT_AUTO_THRESHOLD=30
+DEFAULT_AUTO_IGNORE="vim,nvim,nano,emacs,less,more,man,top,htop,btop,ssh,tmux,screen,tail,watch,python,python3,node,irb,ghci,iex,mysql,psql,sqlite3,mongo,mongosh,bash,zsh,fish,sh"
 
 # ---------------------------------------------------------------------------
 # Efeitos Sonoros Multiplataforma
@@ -252,6 +256,376 @@ send_remote_notification() {
 }
 
 # ---------------------------------------------------------------------------
+# Formatação de Comandos Encadeados (Auto-Plim & Executor)
+# ---------------------------------------------------------------------------
+format_chained_cmd() {
+    local raw="$1"
+    local lang="${2:-$PLIM_LANG}"
+    local clean="$raw"
+
+    # Remove plim run inicial se houver para destacar a linha real executada
+    clean=$(echo "$clean" | sed -E "s/^[[:space:]]*plim[[:space:]]+run[[:space:]]+//")
+
+    case "$clean" in
+        *";"*|*"&&"*|*"||"*)
+            local marked
+            marked=$(echo "$clean" | sed -E "s/[[:space:]]*(&&|\|\||;)[[:space:]]*/@PLIM_SEP@/g")
+
+            local count=0
+            local out=""
+            local IFS_BAK="$IFS"
+            IFS='@'
+            set -f
+            for item in $marked; do
+                if [[ "$item" == "PLIM_SEP" || -z "$item" ]]; then
+                    continue
+                fi
+                item=$(echo "$item" | sed -E "s/^[[:space:]]+|[[:space:]]+$//g")
+                [[ -z "$item" ]] && continue
+                count=$((count + 1))
+                if [[ $count -le 4 ]]; then
+                    if [[ -n "$out" ]]; then
+                        out="$out ➔ $item"
+                    else
+                        out="$item"
+                    fi
+                fi
+            done
+            set +f
+            IFS="$IFS_BAK"
+
+            if [[ $count -gt 1 ]]; then
+                if [[ $count -gt 4 ]]; then
+                    local rem=$((count - 4))
+                    out="$out ... (+$rem)"
+                fi
+                if [[ "$lang" == "pt" ]]; then
+                    echo "⛓️ ($count comandos) $out"
+                else
+                    echo "⛓️ ($count commands) $out"
+                fi
+            else
+                echo "$clean"
+            fi
+            ;;
+        *)
+            echo "$clean"
+            ;;
+    esac
+}
+
+is_pure_plim_cmd() {
+    local cmd="$1"
+    cmd=$(echo "$cmd" | sed -E "s/^[[:space:]]+//")
+    case "$cmd" in
+        plim\ *|./bin/plim\ *|plim-mcp\ *|*/plim\ *)
+            # Se contiver ;, && ou ||, e comando encadeado - nao e puro!
+            case "$cmd" in
+                *";"*|*"&&"*|*"||"*)
+                    return 1
+                    ;;
+                *)
+                    return 0
+                    ;;
+            esac
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+is_ignored_cmd() {
+    local cmd="$1"
+    local ignore_list="${PLIM_AUTO_IGNORE:-$DEFAULT_AUTO_IGNORE}"
+    cmd=$(echo "$cmd" | sed -E "s/^[[:space:]]+//")
+    [[ -z "$cmd" ]] && return 0
+
+    local first_word="${cmd%% *}"
+    first_word=$(basename "$first_word" 2>/dev/null || echo "$first_word")
+
+    local last_part="$cmd"
+    case "$cmd" in
+        *";"*|*"&&"*|*"||"*)
+            last_part=$(echo "$cmd" | sed -E "s/.*(&&|\|\||;)[[:space:]]*//")
+            ;;
+    esac
+    local last_word="${last_part%% *}"
+    last_word=$(basename "$last_word" 2>/dev/null || echo "$last_word")
+
+    if [[ ",$ignore_list," == *",$first_word,"* ]] || [[ ",$ignore_list," == *",$last_word,"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Modo Mensagens de Progresso Dinâmico (Live Status / Edit In-Place)
+# ---------------------------------------------------------------------------
+progress_api_call() {
+    local endpoint="$1"
+    local json_body="$2"
+
+    if [[ -z "$PLIM_API_KEY" ]]; then
+        return 1
+    fi
+
+    local res
+    res=$(curl -s -X POST "${API_URL}/api/progress/${endpoint}" \
+        -H "Authorization: Bearer ${PLIM_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$json_body" 2>/dev/null)
+    echo "$res"
+}
+
+progress_start() {
+    local title="$1"
+    shift 2>/dev/null || true
+    local steps=("$@")
+
+    local steps_json="[]"
+    if [[ ${#steps[@]} -gt 0 ]]; then
+        local items=""
+        for s in "${steps[@]}"; do
+            local esc_s=$(escape_json "$s")
+            if [[ -n "$items" ]]; then
+                items="$items, \"$esc_s\""
+            else
+                items="\"$esc_s\""
+            fi
+        done
+        steps_json="[$items]"
+    fi
+
+    local esc_title=$(escape_json "$title")
+    local body="{\"title\": \"$esc_title\", \"steps\": $steps_json}"
+    local res
+    res=$(progress_api_call "start" "$body")
+
+    local prog_id
+    prog_id=$(echo "$res" | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' 2>/dev/null)
+    if [[ -n "$prog_id" && "$prog_id" != "$res" ]]; then
+        echo "$prog_id"
+        return 0
+    else
+        return 1
+    fi
+}
+
+progress_update() {
+    local prog_id="$1"
+    shift 2>/dev/null || true
+    local percent=""
+    local step=""
+    local total_steps=""
+    local text=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --percent|-p) percent="$2"; shift 2 ;;
+            --step|-s) step="$2"; shift 2 ;;
+            --total|-t) total_steps="$2"; shift 2 ;;
+            --text|-m) text="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body="{\"id\": \"$prog_id\""
+    [[ -n "$percent" ]] && body="$body, \"percent\": $percent"
+    [[ -n "$step" ]] && body="$body, \"step\": $step"
+    [[ -n "$total_steps" ]] && body="$body, \"totalSteps\": $total_steps"
+    if [[ -n "$text" ]]; then
+        local esc_text=$(escape_json "$text")
+        body="$body, \"text\": \"$esc_text\""
+    fi
+    body="$body}"
+
+    progress_api_call "update" "$body" >/dev/null 2>&1 || true
+}
+
+progress_finish() {
+    local prog_id="$1"
+    shift 2>/dev/null || true
+    local status="success"
+    local text=""
+    local duration=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --status|-s) status="$2"; shift 2 ;;
+            --text|-m) text="$2"; shift 2 ;;
+            --duration|-d) duration="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local body="{\"id\": \"$prog_id\", \"status\": \"$status\""
+    if [[ -n "$text" ]]; then
+        local esc_text=$(escape_json "$text")
+        body="$body, \"text\": \"$esc_text\""
+    fi
+    if [[ -n "$duration" ]]; then
+        local esc_dur=$(escape_json "$duration")
+        body="$body, \"duration\": \"$esc_dur\""
+    fi
+    body="$body}"
+
+    progress_api_call "finish" "$body" >/dev/null 2>&1 || true
+
+    if [[ "$status" == "error" ]]; then
+        play_sound "error"
+    else
+        play_sound "success"
+    fi
+}
+
+run_chained_with_progress() {
+    local raw_cmd="$1"
+    local clean="$raw_cmd"
+    clean=$(echo "$clean" | sed -E "s/^[[:space:]]*plim[[:space:]]+run[[:space:]]+//")
+
+    local marked
+    marked=$(echo "$clean" | sed -E "s/[[:space:]]*(&&|\|\||;)[[:space:]]*/@PLIM_SEP@/g")
+
+    local steps=()
+    local IFS_BAK="$IFS"
+    IFS='@'
+    set -f
+    for item in $marked; do
+        if [[ "$item" == "PLIM_SEP" || -z "$item" ]]; then continue; fi
+        item=$(echo "$item" | sed -E "s/^[[:space:]]+|[[:space:]]+$//g")
+        [[ -z "$item" ]] && continue
+        steps+=("$item")
+    done
+    set +f
+    IFS="$IFS_BAK"
+
+    local total=${#steps[@]}
+    if [[ $total -le 1 ]]; then
+        eval "$clean"
+        return $?
+    fi
+
+    local start_time=$(date +%s)
+    local title=$([[ "$PLIM_LANG" == "pt" ]] && echo "Execução Encadeada ($total passos)" || echo "Chained Execution ($total steps)")
+    
+    local prog_id=""
+    if [[ -n "$PLIM_API_KEY" ]]; then
+        prog_id=$(progress_start "$title" "${steps[@]}" 2>/dev/null || true)
+    fi
+
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "🚀 [plim progress] Iniciando execução encadeada ($total passos)..."
+    else
+        echo "🚀 [plim progress] Starting chained execution ($total steps)..."
+    fi
+
+    local exit_code=0
+    local step_idx=0
+    for ((i=0; i<total; i++)); do
+        step_idx=$((i + 1))
+        local current_cmd="${steps[$i]}"
+        local pct=$(( (i * 100) / total ))
+
+        if [[ "$PLIM_LANG" == "pt" ]]; then
+            echo "⏳ [Passo $step_idx/$total] Executando: $current_cmd"
+        else
+            echo "⏳ [Step $step_idx/$total] Running: $current_cmd"
+        fi
+
+        if [[ -n "$prog_id" ]]; then
+            local step_msg=$([[ "$PLIM_LANG" == "pt" ]] && echo "Executando passo $step_idx de $total: $current_cmd" || echo "Running step $step_idx of $total: $current_cmd")
+            progress_update "$prog_id" --step "$step_idx" --total "$total" --percent "$pct" --text "$step_msg"
+        fi
+
+        eval "$current_cmd"
+        exit_code=$?
+
+        if [[ $exit_code -ne 0 ]]; then
+            local end_time=$(date +%s)
+            local duration=$(format_duration $((end_time - start_time)))
+            local fail_msg=$([[ "$PLIM_LANG" == "pt" ]] && echo "Falhou no passo $step_idx/$total (exit $exit_code): $current_cmd" || echo "Failed at step $step_idx/$total (exit $exit_code): $current_cmd")
+
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "❌ [plim progress] $fail_msg"
+            else
+                echo "❌ [plim progress] $fail_msg"
+            fi
+
+            if [[ -n "$prog_id" ]]; then
+                progress_finish "$prog_id" --status error --text "$fail_msg" --duration "$duration"
+            else
+                play_sound "error"
+            fi
+
+            show_desktop_notification "❌ Plim: $fail_msg" "Duração: $duration"
+            return $exit_code
+        fi
+    done
+
+    local end_time=$(date +%s)
+    local duration=$(format_duration $((end_time - start_time)))
+    local success_msg=$([[ "$PLIM_LANG" == "pt" ]] && echo "Todos os $total passos concluídos com sucesso! 🎉" || echo "All $total steps completed successfully! 🎉")
+
+    if [[ "$PLIM_LANG" == "pt" ]]; then
+        echo "✅ [plim progress] $success_msg (Duração: $duration)"
+    else
+        echo "✅ [plim progress] $success_msg (Duration: $duration)"
+    fi
+
+    if [[ -n "$prog_id" ]]; then
+        progress_finish "$prog_id" --status success --text "$success_msg" --duration "$duration"
+    else
+        play_sound "success"
+    fi
+
+    show_desktop_notification "✅ Plim: $success_msg" "Duração: $duration"
+    return 0
+}
+
+manage_progress() {
+    local action="${1:-}"
+    shift 2>/dev/null || true
+
+    case "$action" in
+        start)
+            local title="$1"
+            shift 2>/dev/null || true
+            progress_start "$title" "$@"
+            ;;
+        update)
+            local prog_id="$1"
+            shift 2>/dev/null || true
+            progress_update "$prog_id" "$@"
+            ;;
+        finish)
+            local prog_id="$1"
+            shift 2>/dev/null || true
+            progress_finish "$prog_id" "$@"
+            ;;
+        run)
+            run_chained_with_progress "$*"
+            ;;
+        *)
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "Uso do comando plim progress:"
+                echo "  plim progress run '<cmd1>; <cmd2>; ...'       # Executa comandos encadeados com Live Status no Telegram"
+                echo "  plim progress start 'Título' [passos...]      # Inicia uma mensagem de progresso editável"
+                echo "  plim progress update <id> --percent N --text 'msg' # Atualiza mensagem no Telegram"
+                echo "  plim progress finish <id> --status success|error    # Conclui a mensagem com status final"
+            else
+                echo "Usage of plim progress command:"
+                echo "  plim progress run '<cmd1>; <cmd2>; ...'       # Execute chained commands with Live Status on Telegram"
+                echo "  plim progress start 'Title' [steps...]        # Start an editable live progress message"
+                echo "  plim progress update <id> --percent N --text 'msg' # Update Telegram message in-place"
+                echo "  plim progress finish <id> --status success|error    # Finalize message with completion status"
+            fi
+            return 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # Modo Executor (plim run <comando>)
 # ---------------------------------------------------------------------------
 run_command() {
@@ -259,21 +633,33 @@ run_command() {
         if [[ "$PLIM_LANG" == "pt" ]]; then
             echo "Uso: plim run <comando e argumentos>"
             echo "Exemplo: plim run npm run build"
+            echo "Opções:"
+            echo "  --progress, -P    Executa com Live Status dinâmico no Telegram"
         else
             echo "Usage: plim run <command and arguments>"
             echo "Example: plim run npm run build"
+            echo "Options:"
+            echo "  --progress, -P    Run with dynamic Live Status updates on Telegram"
         fi
         return 1
     fi
 
+    # Se a flag --progress ou -P for passada, executa com progresso vivo
+    if [[ "$1" == "--progress" || "$1" == "-P" ]]; then
+        shift
+        run_chained_with_progress "$*"
+        return $?
+    fi
+
     local full_cmd="$*"
+    local formatted_cmd=$(format_chained_cmd "$full_cmd" "$PLIM_LANG")
     local start_time=$(date +%s)
     local temp_out=$(mktemp -t plim_output.XXXXXX 2>/dev/null || mktemp)
 
     if [[ "$PLIM_LANG" == "pt" ]]; then
-        echo "🚀 [plim] Executando: $full_cmd"
+        echo "🚀 [plim] Executando: $formatted_cmd"
     else
-        echo "🚀 [plim] Running: $full_cmd"
+        echo "🚀 [plim] Running: $formatted_cmd"
     fi
 
     # Executa o comando via eval para suportar flags, pipes e encadeamentos
@@ -305,10 +691,10 @@ run_command() {
     # 2. Notificação local de desktop
     local nl=$'\n'
     local dur_prefix=$([[ "$PLIM_LANG" == "pt" ]] && echo "Duração" || echo "Duration")
-    show_desktop_notification "${status_icon} Plim: ${status_label}" "${dur_prefix}: ${duration}${nl}${full_cmd}"
+    show_desktop_notification "${status_icon} Plim: ${status_label}" "${dur_prefix}: ${duration}${nl}${formatted_cmd}"
 
     # 3. Notificação Remota (Cloudflare Worker ou Telegram Direto)
-    send_remote_notification "${status_icon} ${status_label}: ${full_cmd}" "" "$tail_output" "$duration" "$status_type"
+    send_remote_notification "${status_icon} ${status_label}: ${formatted_cmd}" "" "$tail_output" "$duration" "$status_type"
 
     return $exit_code
 }
@@ -684,6 +1070,368 @@ manage_lang() {
 }
 
 # ---------------------------------------------------------------------------
+# Modo Auto-Plim (Shell Hooks para Zsh, Bash e Fish)
+# ---------------------------------------------------------------------------
+generate_hook_script() {
+    local target_shell="${1:-zsh}"
+
+    case "$target_shell" in
+        zsh)
+            cat << 'EOF'
+# ---------------------------------------------------------------------------
+# Plim Shell Hook (Auto-Plim for Zsh)
+# Monitoramento transparente de comandos demorados e encadeados
+# ---------------------------------------------------------------------------
+_plim_zsh_preexec() {
+    if zmodload zsh/datetime 2>/dev/null; then
+        _PLIM_CMD_START=$EPOCHSECONDS
+    else
+        _PLIM_CMD_START=$(date +%s)
+    fi
+    _PLIM_CMD_LINE="$1"
+}
+
+_plim_zsh_precmd() {
+    local exit_code=$?
+    if [[ -n "$_PLIM_CMD_START" ]]; then
+        local now
+        if zmodload zsh/datetime 2>/dev/null; then
+            now=$EPOCHSECONDS
+        else
+            now=$(date +%s)
+        fi
+        local elapsed=$((now - _PLIM_CMD_START))
+        local cmd="$_PLIM_CMD_LINE"
+        _PLIM_CMD_START=""
+        _PLIM_CMD_LINE=""
+
+        local threshold="${PLIM_AUTO_THRESHOLD:-30}"
+        if (( elapsed >= threshold )); then
+            command plim hook notify "$exit_code" "$elapsed" "$cmd" </dev/null >/dev/null 2>&1 &
+        fi
+    fi
+}
+
+autoload -Uz add-zsh-hook 2>/dev/null || true
+add-zsh-hook preexec _plim_zsh_preexec 2>/dev/null || true
+add-zsh-hook precmd _plim_zsh_precmd 2>/dev/null || true
+EOF
+            ;;
+
+        bash)
+            cat << 'EOF'
+# ---------------------------------------------------------------------------
+# Plim Shell Hook (Auto-Plim for Bash)
+# Monitoramento transparente de comandos demorados e encadeados
+# ---------------------------------------------------------------------------
+_plim_bash_preexec() {
+    if [[ -z "$_PLIM_CMD_START" ]]; then
+        _PLIM_CMD_START=$(date +%s)
+        _PLIM_CMD_LINE=$(history 1 2>/dev/null | sed 's/^[ ]*[0-9]*[ ]*//')
+        [[ -z "$_PLIM_CMD_LINE" ]] && _PLIM_CMD_LINE="$BASH_COMMAND"
+    fi
+}
+
+_plim_bash_precmd() {
+    local exit_code=$?
+    if [[ -n "$_PLIM_CMD_START" ]]; then
+        local now=$(date +%s)
+        local elapsed=$((now - _PLIM_CMD_START))
+        local cmd="$_PLIM_CMD_LINE"
+        _PLIM_CMD_START=""
+        _PLIM_CMD_LINE=""
+
+        local threshold="${PLIM_AUTO_THRESHOLD:-30}"
+        if [[ $elapsed -ge $threshold ]]; then
+            command plim hook notify "$exit_code" "$elapsed" "$cmd" </dev/null >/dev/null 2>&1 &
+        fi
+    fi
+}
+
+trap '_plim_bash_preexec' DEBUG
+if [[ -z "$PROMPT_COMMAND" ]]; then
+    PROMPT_COMMAND="_plim_bash_precmd"
+elif [[ "$PROMPT_COMMAND" != *"_plim_bash_precmd"* ]]; then
+    PROMPT_COMMAND="_plim_bash_precmd; $PROMPT_COMMAND"
+fi
+EOF
+            ;;
+
+        fish)
+            cat << 'EOF'
+# ---------------------------------------------------------------------------
+# Plim Shell Hook (Auto-Plim for Fish)
+# Monitoramento transparente de comandos demorados e encadeados
+# ---------------------------------------------------------------------------
+function _plim_fish_preexec --on-event fish_preexec
+    set -g _PLIM_CMD_START (date +%s)
+    set -g _PLIM_CMD_LINE "$argv[1]"
+end
+
+function _plim_fish_postexec --on-event fish_postexec
+    set -l exit_code $status
+    if set -q _PLIM_CMD_START
+        set -l now (date +%s)
+        set -l elapsed (math $now - $_PLIM_CMD_START)
+        set -l threshold (test -n "$PLIM_AUTO_THRESHOLD"; and echo "$PLIM_AUTO_THRESHOLD"; or echo "30")
+        if test $elapsed -ge $threshold
+            set -l cmd_line "$_PLIM_CMD_LINE"
+            command plim hook notify "$exit_code" "$elapsed" "$cmd_line" </dev/null >/dev/null 2>&1 &
+        end
+        set -e _PLIM_CMD_START
+        set -e _PLIM_CMD_LINE
+    end
+end
+EOF
+            ;;
+
+        *)
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "Shell não suportado: $target_shell (suportados: zsh, bash, fish)" >&2
+            else
+                echo "Unsupported shell: $target_shell (supported: zsh, bash, fish)" >&2
+            fi
+            return 1
+            ;;
+    esac
+}
+
+hook_notify() {
+    local exit_code="${1:-0}"
+    local elapsed="${2:-0}"
+    shift 2 2>/dev/null || true
+    local raw_cmd="$*"
+
+    local threshold="${PLIM_AUTO_THRESHOLD:-$DEFAULT_AUTO_THRESHOLD}"
+    # Se durou menos que o limiar, nao faz nada
+    if [[ "$elapsed" -lt "$threshold" ]]; then
+        return 0
+    fi
+
+    # Se for comando interativo ignorado, nao faz nada
+    if is_ignored_cmd "$raw_cmd"; then
+        return 0
+    fi
+
+    # Se for invocacao pura do plim (sem encadeamentos), o plim ja gerenciou o alerta!
+    if is_pure_plim_cmd "$raw_cmd"; then
+        return 0
+    fi
+
+    local formatted_cmd=$(format_chained_cmd "$raw_cmd" "$PLIM_LANG")
+    local duration=$(format_duration "$elapsed")
+
+    local status_icon status_label status_type sound_key
+    if [[ $exit_code -eq 0 ]]; then
+        status_icon="✅"
+        status_label=$([[ "$PLIM_LANG" == "pt" ]] && echo "Sucesso" || echo "Success")
+        status_type="success"
+        sound_key="success"
+    else
+        status_icon="❌"
+        status_label=$([[ "$PLIM_LANG" == "pt" ]] && echo "Falha (exit $exit_code)" || echo "Failed (exit $exit_code)")
+        status_type="error"
+        sound_key="error"
+    fi
+
+    # 1. Som nativo local (se nao desativado explicitamente)
+    if [[ "${PLIM_AUTO_SOUND:-true}" != "false" ]]; then
+        play_sound "$sound_key"
+    fi
+
+    # 2. Notificacao local no Desktop
+    if [[ "${PLIM_AUTO_DESKTOP:-true}" != "false" ]]; then
+        local nl=$'\n'
+        local dur_prefix=$([[ "$PLIM_LANG" == "pt" ]] && echo "Duração" || echo "Duration")
+        show_desktop_notification "${status_icon} Plim: ${status_label}" "${dur_prefix}: ${duration}${nl}${formatted_cmd}"
+    fi
+
+    # 3. Notificacao remota (Telegram)
+    if [[ "${PLIM_AUTO_TELEGRAM:-true}" != "false" ]]; then
+        send_remote_notification "${status_icon} ${status_label}: ${formatted_cmd}" "" "" "$duration" "$status_type"
+    fi
+}
+
+manage_hook() {
+    local action="${1:-}"
+
+    case "$action" in
+        zsh|bash|fish)
+            generate_hook_script "$action"
+            ;;
+
+        notify)
+            shift
+            hook_notify "$@"
+            ;;
+
+        install)
+            shift
+            local target_shell="${1:-}"
+            if [[ -z "$target_shell" ]]; then
+                if [[ "$SHELL" == *"zsh"* ]]; then target_shell="zsh"
+                elif [[ "$SHELL" == *"bash"* ]]; then target_shell="bash"
+                elif [[ "$SHELL" == *"fish"* ]]; then target_shell="fish"
+                else target_shell="zsh"
+                fi
+            fi
+
+            local rcfile=""
+            case "$target_shell" in
+                zsh)
+                    rcfile="$HOME/.zshrc"
+                    ;;
+                bash)
+                    if [[ "$OSTYPE" == "darwin"* && -f "$HOME/.bash_profile" ]]; then
+                        rcfile="$HOME/.bash_profile"
+                    else
+                        rcfile="$HOME/.bashrc"
+                    fi
+                    ;;
+                fish)
+                    rcfile="$HOME/.config/fish/config.fish"
+                    ;;
+                *)
+                    echo "Shell inválido: $target_shell (opções: zsh, bash, fish)"
+                    return 1
+                    ;;
+            esac
+
+            mkdir -p "$(dirname "$rcfile")" 2>/dev/null || true
+            touch "$rcfile" 2>/dev/null || true
+
+            if grep -q "plim hook" "$rcfile" 2>/dev/null; then
+                if [[ "$PLIM_LANG" == "pt" ]]; then
+                    echo "ℹ️  O hook do Auto-Plim já está instalado em: $rcfile"
+                else
+                    echo "ℹ️  Auto-Plim hook is already installed in: $rcfile"
+                fi
+                return 0
+            fi
+
+            if [[ "$target_shell" == "fish" ]]; then
+                cat << 'EOF' >> "$rcfile"
+
+# Plim Shell Hook (Auto-Plim)
+plim hook fish | source
+EOF
+            else
+                cat << EOF >> "$rcfile"
+
+# Plim Shell Hook (Auto-Plim)
+eval "\$(plim hook $target_shell)"
+EOF
+            fi
+
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "🎉 Hook do Auto-Plim ($target_shell) instalado com sucesso em: $rcfile"
+                echo "👉 Para ativar agora no terminal atual, rode:"
+                echo "   source $rcfile"
+            else
+                echo "🎉 Auto-Plim hook ($target_shell) successfully installed in: $rcfile"
+                echo "👉 To activate in your current terminal session, run:"
+                echo "   source $rcfile"
+            fi
+            ;;
+
+        uninstall)
+            shift
+            local rcfiles=("$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish")
+            local removed=0
+            for f in "${rcfiles[@]}"; do
+                if [[ -f "$f" ]] && grep -q "plim hook" "$f" 2>/dev/null; then
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        sed -i '' '/# Plim Shell Hook (Auto-Plim)/d' "$f" 2>/dev/null || true
+                        sed -i '' '/plim hook/d' "$f" 2>/dev/null || true
+                    else
+                        sed -i '/# Plim Shell Hook (Auto-Plim)/d' "$f" 2>/dev/null || true
+                        sed -i '/plim hook/d' "$f" 2>/dev/null || true
+                    fi
+                    removed=1
+                    if [[ "$PLIM_LANG" == "pt" ]]; then
+                        echo "✅ Hook removido de: $f"
+                    else
+                        echo "✅ Hook removed from: $f"
+                    fi
+                fi
+            done
+
+            if [[ $removed -eq 0 ]]; then
+                if [[ "$PLIM_LANG" == "pt" ]]; then
+                    echo "ℹ️  Nenhuma instalação do hook foi encontrada nos arquivos de configuração."
+                else
+                    echo "ℹ️  No hook installation found in shell configuration files."
+                fi
+            fi
+            ;;
+
+        status)
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "⚡ Status do Auto-Plim (Shell Hook):"
+                echo "  Limiar de tempo: ${PLIM_AUTO_THRESHOLD:-$DEFAULT_AUTO_THRESHOLD} segundos"
+                echo "  Notificação no Telegram: ${PLIM_AUTO_TELEGRAM:-true}"
+                echo "  Som local: ${PLIM_AUTO_SOUND:-true}"
+                echo "  Comandos ignorados: ${PLIM_AUTO_IGNORE:-$DEFAULT_AUTO_IGNORE}"
+                echo ""
+                echo "Instalações detectadas:"
+                for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
+                    if [[ -f "$f" ]] && grep -q "plim hook" "$f" 2>/dev/null; then
+                        echo "  ✅ Instalado em: $f"
+                    fi
+                done
+                echo ""
+                echo "Comandos disponíveis:"
+                echo "  plim hook install   # Instala no shell atual"
+                echo "  plim hook test      # Testa a notificação do Auto-Plim"
+            else
+                echo "⚡ Auto-Plim Status (Shell Hook):"
+                echo "  Duration threshold: ${PLIM_AUTO_THRESHOLD:-$DEFAULT_AUTO_THRESHOLD} seconds"
+                echo "  Telegram push: ${PLIM_AUTO_TELEGRAM:-true}"
+                echo "  Local sound: ${PLIM_AUTO_SOUND:-true}"
+                echo "  Ignored commands: ${PLIM_AUTO_IGNORE:-$DEFAULT_AUTO_IGNORE}"
+                echo ""
+                echo "Detected installations:"
+                for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
+                    if [[ -f "$f" ]] && grep -q "plim hook" "$f" 2>/dev/null; then
+                        echo "  ✅ Installed in: $f"
+                    fi
+                done
+                echo ""
+                echo "Available commands:"
+                echo "  plim hook install   # Install hook in current shell"
+                echo "  plim hook test      # Test Auto-Plim notification"
+            fi
+            ;;
+
+        test)
+            shift
+            local test_cmd="${*:-plim run flutter clean;npm run build:all;sleep 15;firebase deploy -P production}"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "🧪 Testando Auto-Plim com comando demorado simulado (88s):"
+                echo "   Comando: $test_cmd"
+            else
+                echo "🧪 Testing Auto-Plim with simulated long-running command (88s):"
+                echo "   Command: $test_cmd"
+            fi
+            hook_notify 0 88 "$test_cmd"
+            if [[ "$PLIM_LANG" == "pt" ]]; then
+                echo "✅ Teste concluído! Verifique o som local e a notificação no Telegram."
+            else
+                echo "✅ Test completed! Check local sound and Telegram push notification."
+            fi
+            ;;
+
+        *)
+            local auto_sh="zsh"
+            if [[ "$SHELL" == *"bash"* ]]; then auto_sh="bash"
+            elif [[ "$SHELL" == *"fish"* ]]; then auto_sh="fish"
+            fi
+            generate_hook_script "$auto_sh"
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
 # Roteamento de Comandos CLI
 # ---------------------------------------------------------------------------
 case "$1" in
@@ -714,6 +1462,16 @@ case "$1" in
     lang|--lang)
         shift
         manage_lang "$@"
+        ;;
+
+    hook|--hook)
+        shift
+        manage_hook "$@"
+        ;;
+
+    progress|--progress)
+        shift
+        manage_progress "$@"
         ;;
 
     connect)
@@ -944,6 +1702,13 @@ EOF
                 echo "  plim [mensagem]                # Notificação rápida (ex: plim 'Deploy pronto')"
                 echo "  plim ask <pergunta> [opções]   # Pergunta interativa com botões no Telegram e aguarda resposta"
                 echo "  plim run <comando e args>      # Roda o comando, mede tempo, detecta sucesso/erro e notifica"
+                echo "  plim run --progress <cmds>     # Executa cadeia de comandos com Live Status no Telegram"
+                echo "  plim progress run <cmds>       # Executa cadeia de comandos com Live Status no Telegram"
+                echo "  plim progress start/update/... # Gerencia mensagens dinâmicas de progresso no Telegram"
+                echo "  plim hook [zsh|bash|fish]      # Gera script do hook Auto-Plim para comandos demorados (> 30s)"
+                echo "  plim hook install              # Instala o hook do Auto-Plim no shell atual"
+                echo "  plim hook status               # Exibe status e configurações do Auto-Plim"
+                echo "  plim hook test                 # Simula disparo do Auto-Plim com comando demorado"
                 echo "  plim -n 'Mensagem'             # Notificação no desktop e Telegram"
                 echo "  comando | plim                 # Lê a saída em tempo real e avisa no término"
                 echo "  comando | plim 'Mensagem'      # Lê a saída e notifica com mensagem customizada"
@@ -961,6 +1726,13 @@ EOF
                 echo "  plim [message]                 # Quick notification (e.g. plim 'Build finished')"
                 echo "  plim ask <question> [options]  # Interactive question with Telegram buttons, wait for answer"
                 echo "  plim run <command and args>    # Run command, measure time, detect success/error, notify"
+                echo "  plim run --progress <cmds>     # Run command chain with dynamic Live Status on Telegram"
+                echo "  plim progress run <cmds>       # Run command chain with dynamic Live Status on Telegram"
+                echo "  plim progress start/update/... # Manage in-place dynamic progress messages on Telegram"
+                echo "  plim hook [zsh|bash|fish]      # Output Auto-Plim shell hook for long-running commands (> 30s)"
+                echo "  plim hook install              # Install Auto-Plim hook into current shell profile"
+                echo "  plim hook status               # View Auto-Plim status and configuration"
+                echo "  plim hook test                 # Simulate Auto-Plim notification with a long command"
                 echo "  plim -n 'Message'              # Desktop and Telegram push notification"
                 echo "  command | plim                 # Stream output and alert when finished"
                 echo "  command | plim 'Message'       # Stream output and notify with custom message"

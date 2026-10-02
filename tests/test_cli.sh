@@ -113,6 +113,58 @@ assert_contains "plim run em inglês exibe 'Running:'" "Running:" "$RUN_EN_OUT"
 RUN_PT_OUT=$(PLIM_LANG=pt "$PLIM_BIN" run true 2>&1)
 assert_contains "plim run em português exibe 'Executando:'" "Executando:" "$RUN_PT_OUT"
 
+# 10. Auto-Plim (Shell Hooks: Zsh, Bash, Fish)
+HOOK_ZSH_OUT=$("$PLIM_BIN" hook zsh)
+assert_contains "plim hook zsh contém preexec" "_plim_zsh_preexec" "$HOOK_ZSH_OUT"
+assert_contains "plim hook zsh contém add-zsh-hook" "add-zsh-hook preexec" "$HOOK_ZSH_OUT"
+
+HOOK_BASH_OUT=$("$PLIM_BIN" hook bash)
+assert_contains "plim hook bash contém trap DEBUG" "trap '_plim_bash_preexec' DEBUG" "$HOOK_BASH_OUT"
+assert_contains "plim hook bash contém PROMPT_COMMAND" "PROMPT_COMMAND" "$HOOK_BASH_OUT"
+
+HOOK_FISH_OUT=$("$PLIM_BIN" hook fish)
+assert_contains "plim hook fish contém fish_preexec" "--on-event fish_preexec" "$HOOK_FISH_OUT"
+assert_contains "plim hook fish contém fish_postexec" "--on-event fish_postexec" "$HOOK_FISH_OUT"
+
+HOOK_STATUS_OUT=$(PLIM_LANG=pt "$PLIM_BIN" hook status)
+assert_contains "plim hook status em português exibe limiar" "Limiar de tempo:" "$HOOK_STATUS_OUT"
+assert_contains "plim hook status em português exibe comandos ignorados" "Comandos ignorados:" "$HOOK_STATUS_OUT"
+
+HOOK_STATUS_EN=$(PLIM_LANG=en "$PLIM_BIN" hook status)
+assert_contains "plim hook status em inglês exibe threshold" "Duration threshold:" "$HOOK_STATUS_EN"
+
+# 11. Formatação de Comandos Encadeados (Exemplo do Usuário)
+CHAINED_CMD="flutter clean;npm run build:all;sleep 15;firebase deploy -P production"
+CHAINED_PT_OUT=$(PLIM_LANG=pt "$PLIM_BIN" run "true;$CHAINED_CMD" 2>&1 || true)
+assert_contains "plim run detecta e formata 5 comandos encadeados em PT" "⛓️ (5 comandos)" "$CHAINED_PT_OUT"
+assert_contains "plim run exibe setas de transição ➔" "➔" "$CHAINED_PT_OUT"
+
+CHAINED_EN_OUT=$(PLIM_LANG=en "$PLIM_BIN" run "true;$CHAINED_CMD" 2>&1 || true)
+assert_contains "plim run detecta comandos encadeados em EN" "⛓️ (5 commands)" "$CHAINED_EN_OUT"
+
+# 12. Simulação do plim hook test
+HOOK_TEST_OUT=$(PLIM_LANG=pt "$PLIM_BIN" hook test "plim run flutter clean;npm run build:all;sleep 15;firebase deploy -P production")
+assert_contains "plim hook test executa simulação com sucesso" "Teste concluído!" "$HOOK_TEST_OUT"
+
+# 13. Mensagens de Progresso e Comandos Encadeados (plim progress & plim run --progress)
+HELP_PROG_OUT=$("$PLIM_BIN" --help)
+assert_contains "plim --help inclui comando plim progress" "plim progress" "$HELP_PROG_OUT"
+assert_contains "plim --help inclui flag --progress" "--progress" "$HELP_PROG_OUT"
+
+PROG_USAGE_PT=$(PLIM_LANG=pt "$PLIM_BIN" progress 2>&1 || true)
+assert_contains "plim progress em português exibe instruções de uso" "Uso do comando plim progress:" "$PROG_USAGE_PT"
+
+PROG_USAGE_EN=$(PLIM_LANG=en "$PLIM_BIN" progress 2>&1 || true)
+assert_contains "plim progress em inglês exibe usage instructions" "Usage of plim progress command:" "$PROG_USAGE_EN"
+
+PROG_RUN_PT=$(PLIM_LANG=pt "$PLIM_BIN" progress run "echo etapa1; echo etapa2" 2>&1)
+assert_contains "plim progress run executa passo a passo em PT" "Passo 1/2" "$PROG_RUN_PT"
+assert_contains "plim progress run conclui com sucesso em PT" "Todos os 2 passos concluídos com sucesso" "$PROG_RUN_PT"
+
+RUN_FLAG_PROG=$(PLIM_LANG=en "$PLIM_BIN" run --progress "echo step1; echo step2" 2>&1)
+assert_contains "plim run --progress executa passo a passo em EN" "Step 1/2" "$RUN_FLAG_PROG"
+assert_contains "plim run --progress conclui com sucesso em EN" "All 2 steps completed successfully" "$RUN_FLAG_PROG"
+
 echo "----------------------------------------"
 echo "📊 Resumo dos Testes CLI: $PASSED/$TOTAL passaram ($FAILED falhas)"
 
