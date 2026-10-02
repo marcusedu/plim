@@ -5,6 +5,18 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.4.1] - 2026-10-01
+
+### ✨ Adicionado
+- **Encaminhamento de Comandos CLI via `npx plim-mcp`**:
+  - `npx plim-mcp` agora reconhece e encaminha comandos da CLI diretamente (ex: `npx plim-mcp test`, `npx plim-mcp run <cmd>`, `npx plim-mcp -n "msg"`).
+  - Adicionado comando `npx plim-mcp --help` com instruções rápidas e guia de configuração MCP.
+  - Exposição de ambos os binários (`plim-mcp` e `plim`) no `package.json`.
+- **Experiência Interativa no Terminal (TTY)**:
+  - Adicionado banner informativo no `stderr` quando `plim-mcp` é executado sem argumentos em um terminal interativo (TTY), informando que o servidor está aguardando conexões JSON-RPC e sugerindo comandos úteis.
+
+---
+
 ## [1.4.0] - 2026-10-01
 
 ### ✨ Adicionado

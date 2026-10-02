@@ -5,11 +5,13 @@
  * Allows AI agents (Claude Desktop, Cursor, Cline, Windsurf) to notify developers.
  */
 
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const readline = require('readline');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+const SERVER_VERSION = '1.4.1';
 
 function resolvePlimBin() {
   const localBin = path.resolve(__dirname, 'plim');
@@ -28,6 +30,40 @@ function resolvePlimBin() {
 }
 
 const PLIM_BIN = resolvePlimBin();
+
+function forwardToCli(args) {
+  const plimBin = resolvePlimBin();
+  let cmd = plimBin;
+  let cmdArgs = args;
+
+  if (process.platform === 'win32') {
+    const psScript = path.resolve(__dirname, 'plim.ps1');
+    if (fs.existsSync(psScript)) {
+      cmd = 'powershell.exe';
+      cmdArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psScript, ...args];
+    } else {
+      cmd = 'bash';
+      cmdArgs = [plimBin, ...args];
+    }
+  } else {
+    try {
+      if (fs.existsSync(plimBin)) {
+        fs.chmodSync(plimBin, 0o755);
+      }
+    } catch (e) {}
+    cmd = 'bash';
+    cmdArgs = [plimBin, ...args];
+  }
+
+  const child = spawn(cmd, cmdArgs, { stdio: 'inherit' });
+  child.on('close', (code) => {
+    process.exit(code || 0);
+  });
+  child.on('error', (err) => {
+    process.stderr.write(`[plim-mcp] Failed to execute CLI: ${err.message}\n`);
+    process.exit(1);
+  });
+}
 
 function playDesktopSound(name = 'Glass') {
   if (process.platform === 'darwin') {
@@ -168,7 +204,7 @@ function handleRequest(req) {
       },
       serverInfo: {
         name: 'plim-mcp',
-        version: '1.4.0',
+        version: SERVER_VERSION,
       },
     });
   }
@@ -428,7 +464,93 @@ function handleRequest(req) {
   }
 }
 
-// Inicializa leitor de linhas sobre stdio
+// Processa argumentos de linha de comando se houver
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0 && cliArgs[0] !== 'mcp') {
+  const firstArg = cliArgs[0];
+  if (firstArg === '--help' || firstArg === '-h' || firstArg === 'help') {
+    const { lang } = loadPlimConfig();
+    if (lang === 'pt') {
+      console.log(`
+Plim MCP Server & CLI - v${SERVER_VERSION}
+
+Modo Servidor MCP (no Claude Desktop / Cursor / Windsurf mcp.json):
+  {
+    "mcpServers": {
+      "plim": {
+        "command": "npx",
+        "args": ["-y", "plim-mcp"]
+      }
+    }
+  }
+
+Comandos Rápidos via npx:
+  npx plim-mcp test               # Testa som e notificação no Telegram
+  npx plim-mcp run <comando>      # Monitora execução, tempo e status
+  npx plim-mcp -n "Mensagem"      # Dispara notificação no desktop e Telegram
+  npx plim-mcp connect <token>    # Conecta ao @plim_the_bot
+  npx plim-mcp ask "Pergunta?"    # Pergunta com botões no Telegram
+  npx plim-mcp lang [en|pt]       # Exibe ou altera idioma
+  npx plim-mcp version            # Exibe a versão instalada
+`);
+    } else {
+      console.log(`
+Plim MCP Server & CLI - v${SERVER_VERSION}
+
+Usage as MCP Server (in Claude Desktop / Cursor / Windsurf mcp.json):
+  {
+    "mcpServers": {
+      "plim": {
+        "command": "npx",
+        "args": ["-y", "plim-mcp"]
+      }
+    }
+  }
+
+Quick Commands via npx:
+  npx plim-mcp test               # Test audio cues and Telegram delivery
+  npx plim-mcp run <command>      # Monitor execution duration and status
+  npx plim-mcp -n "Message"       # Trigger desktop and Telegram notification
+  npx plim-mcp connect <token>    # Link terminal to @plim_the_bot
+  npx plim-mcp ask "Question?"    # Interactive Telegram buttons
+  npx plim-mcp lang [en|pt]       # Display or switch language
+  npx plim-mcp version            # Display current version
+`);
+    }
+    process.exit(0);
+  }
+
+  // Encaminha comando para o binário da CLI
+  forwardToCli(cliArgs);
+  return;
+}
+
+// Inicia servidor MCP sobre stdio
+if (process.stdin.isTTY) {
+  const { lang } = loadPlimConfig();
+  if (lang === 'pt') {
+    process.stderr.write(
+      `🚀 Servidor Plim MCP v${SERVER_VERSION} em execução no stdio.\n` +
+      `Aguardando mensagens JSON-RPC de agentes de IA (Claude, Cursor, Windsurf, Antigravity)...\n\n` +
+      `💡 Dica: Para rodar comandos no terminal via npx, use:\n` +
+      `   npx plim-mcp test\n` +
+      `   npx plim-mcp run <comando>\n` +
+      `   npx plim-mcp connect <token>\n\n` +
+      `Pressione Ctrl+C para encerrar.\n\n`
+    );
+  } else {
+    process.stderr.write(
+      `🚀 Plim MCP Server v${SERVER_VERSION} running on stdio.\n` +
+      `Listening for JSON-RPC from AI agents (Claude, Cursor, Windsurf, Antigravity)...\n\n` +
+      `💡 Tip: To run CLI commands in terminal via npx, use:\n` +
+      `   npx plim-mcp test\n` +
+      `   npx plim-mcp run <command>\n` +
+      `   npx plim-mcp connect <token>\n\n` +
+      `Press Ctrl+C to exit.\n\n`
+    );
+  }
+}
+
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,

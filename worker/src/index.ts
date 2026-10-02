@@ -373,7 +373,7 @@ app.get('/', (c) => {
   return c.json({
     status: 'ok',
     service: 'Plim API & Telegram Worker',
-    version: '1.4.0',
+    version: '1.4.1',
     docs: 'https://github.com/marcusedu/plim',
   });
 });

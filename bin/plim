@@ -22,7 +22,7 @@ if [[ -z "$PLIM_LANG" ]]; then
     fi
 fi
 
-PLIM_VERSION="1.4.0"
+PLIM_VERSION="1.4.1"
 GITHUB_REPO="marcusedu/plim"
 RAW_BASE_URL="https://raw.githubusercontent.com/${GITHUB_REPO}/main"
 

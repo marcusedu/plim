@@ -1,7 +1,7 @@
 {
   "schemaVersion": "guard.mcp-server-contribution.v1",
   "id": "mcp.plim",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "name": "Plim MCP",
   "description": "Desktop audio alerts, interactive Telegram questions, and terminal command monitoring for AI coding agents.",
   "trustClass": "external",

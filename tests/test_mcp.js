@@ -135,6 +135,16 @@ async function runTests() {
 
   mcpProcess.kill();
 
+  // Teste 5: Execução via CLI (plim-mcp --help)
+  const { execSync } = require('child_process');
+  const helpOut = execSync(`node "${MCP_PATH}" --help`).toString();
+  assert(helpOut.includes('Plim MCP Server & CLI'), 'plim-mcp --help exibe cabeçalho informativo');
+  assert(helpOut.includes('npx plim-mcp test'), 'plim-mcp --help exibe comandos rápidos');
+
+  // Teste 6: Encaminhamento de comando CLI (plim-mcp version)
+  const verOut = execSync(`node "${MCP_PATH}" version`).toString();
+  assert(verOut.includes('Plim v'), 'plim-mcp version encaminha e exibe versão');
+
   console.log('----------------------------------------');
   console.log(`📊 Resumo dos Testes MCP: ${passed}/${total} passaram (${failed} falhas)`);
 
